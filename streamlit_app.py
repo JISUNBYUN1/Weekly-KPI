@@ -269,6 +269,13 @@ with tab3:
     
     partners_list = ['평강', '문성', '현성', '하나로', '회산', '케이디엘', '클릭나라']
     
+    # 선택된 주차에 맞게 데이터 생성
+    if selected_week not in sample_data or f"{partners_list[0]}_{selected_week}" not in sample_data:
+        # 선택한 주차가 없으면 W34 데이터를 복사해서 사용
+        for partner in partners_list:
+            if f"{partner}_{selected_week}" not in sample_data:
+                sample_data[f"{partner}_{selected_week}"] = sample_data[f"{partner}_W34"]
+    
     # KPI 요약
     st.subheader(f"📊 {selected_week} KPI 요약")
     
