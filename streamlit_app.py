@@ -331,8 +331,41 @@ with tab3:
             
             st.divider()
             
-            st.markdown("**주요 마케팅 활동**")
-            st.info(data['marketing'])
+            st.markdown("**📋 주요 마케팅 활동**")
+            
+            # Claude AI로 자동 정리
+            try:
+                client = anthropic.Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
+                
+                message = client.messages.create(
+                    model="claude-3-5-sonnet-20241022",
+                    max_tokens=800,
+                    messages=[
+                        {"role": "user", "content": f"""다음 마케팅 활동을 정리해주세요:
+
+{data['marketing']}
+
+요청:
+1. 각 항목 앞에 적절한 이모지 추가
+2. 구체적인 수치/세부사항 유지
+3. 4~5개 주요 항목으로 정렬
+4. 각 항목: [이모지 활동명] 세부내용
+
+예시:
+📱 SNS 광고 - 일 예산 50,000원, MZ세대 타겟
+🏪 POP 배치 - 프리미엄 라인 중심
+👥 고객 상담 - 1:1 맞춤상담 강화
+
+정리된 결과만 반환:"""}
+                    ]
+                )
+                
+                # 결과를 박스로 표시
+                st.success(message.content[0].text)
+                
+            except:
+                # API 키가 없으면 원본 표시
+                st.info(data['marketing'])
 
 # ==================== TAB 4: AI 분석 ====================
 with tab4:
