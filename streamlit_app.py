@@ -68,18 +68,53 @@ with tabs[0]:
 
 # TAB 2
 with tabs[1]:
-    st.header("📊 FCST 현황 (BIZ PLAN)")
+    st.header("FCST 현황")
+    
     if data['bizplan']:
-        channels = list(data['bizplan'].keys())
-        channel = st.selectbox("채널", channels, key="t2_ch")
-        if channel in data['bizplan']:
-            products = list(data['bizplan'][channel].keys())
-            product = st.selectbox("제품", products, key="t2_prod")
-            if product in data['bizplan'][channel]:
-                for model, model_data in data['bizplan'][channel][product].items():
-                    st.write(f"**{model}**")
-                    df = pd.DataFrame([{"월": k, "값": f"{v:,.0f}" if isinstance(v, (int, float)) else v} for k, v in model_data.items()])
-                    st.dataframe(df, use_container_width=True)
+        # 모든 제품 수집
+        all_products = set()
+        for channel_data in data['bizplan'].values():
+            all_products.update(channel_data.keys())
+        all_products = sorted(list(all_products))
+        
+        # 제품 선택
+        selected_product = st.selectbox("📦 제품 선택", all_products, key="t2_product")
+        
+        if selected_product:
+            st.subheader(f"📊 {selected_product}")
+            
+            # 모든 채널의 데이터를 한 번에 표시
+            for channel_name, channel_data in data['bizplan'].items():
+                if selected_product in channel_data:
+                    product_models = channel_data[selected_product]
+                    
+                    # 채널별 표시
+                    st.write(f"**📍 {channel_name} 채널**")
+                    
+                    # 모든 모델 표시
+                    for model_name, model_data in product_models.items():
+                        st.write(f"*{model_name}*")
+                        
+                        # 월별 데이터 추출 (2025 키)
+                        if '2025' in model_data:
+                            monthly_data = model_data['2025']
+                            
+                            # 테이블 구성: 월 / 실적(2025) / 경영대비(ANNUAL) / 실행대비(ACTION) / 전년대비(SALES)
+                            rows = []
+                            for month in monthly_data.keys():
+                                row = {
+                                    "월": month,
+                                    "실적": f"{monthly_data[month]:,.0f}" if isinstance(monthly_data[month], (int, float)) else monthly_data[month],
+                                    "경영대비": f"{model_data.get('ANNUAL', {}).get(month, 0):,.0f}",
+                                    "실행대비": f"{model_data.get('ACTION', {}).get(month, 0):,.0f}",
+                                    "전년대비": f"{model_data.get('SALES', {}).get(month, 0):,.0f}"
+                                }
+                                rows.append(row)
+                            
+                            if rows:
+                                st.dataframe(pd.DataFrame(rows), use_container_width=True)
+                    
+                    st.divider()
 
 # TAB 3
 with tabs[2]:
