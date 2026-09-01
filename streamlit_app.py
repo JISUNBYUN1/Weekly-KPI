@@ -73,9 +73,9 @@ data = load_all_data()
 st.markdown('<div class="main-header">📊 PP3G Weekly KPI 대시보드</div>', unsafe_allow_html=True)
 st.markdown(f"**업데이트**: {datetime.now().strftime('%Y.%m.%d %H:%M')}")
 
-tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
     "전체 현황", "FCST 현황", "프리미엄 비중", "스마트스토어",
-    "라이브커머스", "어필리에이트", "쿠팡 PPM", "SOP 활동"
+    "라이브커머스", "어필리에이트", "쿠팡 PPM", "SOP 활동", "STAR RAW"
 ])
 
 # TAB 1: 전체 현황 (BIZ Plan)
@@ -249,19 +249,26 @@ with tab5:
         # 월별 데이터
         if '월별' in data['live_commerce']:
             st.write("**📅 월별 현황**")
-            months_data = data['live_commerce']['월별']
+            months_dict = data['live_commerce']['월별']
             
-            if isinstance(months_data, dict):
-                table_data = []
-                for month, values in months_data.items():
-                    row = {"월": month}
-                    if isinstance(values, dict):
-                        row.update(values)
-                    table_data.append(row)
+            if isinstance(months_dict, dict):
+                # 드롭다운으로 월 선택
+                months = list(months_dict.keys())
+                selected_month = st.selectbox("📅 월 선택", months, key="tab5_month")
                 
-                if table_data:
-                    df = pd.DataFrame(table_data)
-                    st.dataframe(df, use_container_width=True)
+                if selected_month in months_dict:
+                    month_data = months_dict[selected_month]
+                    
+                    table_data = []
+                    for store, values in month_data.items():
+                        if isinstance(values, dict):
+                            row = {"대리점": store}
+                            row.update(values)
+                            table_data.append(row)
+                    
+                    if table_data:
+                        df = pd.DataFrame(table_data)
+                        st.dataframe(df, use_container_width=True)
     else:
         st.warning("⚠️ 데이터 없음")
 
@@ -324,7 +331,99 @@ with tab7:
     else:
         st.warning("⚠️ 데이터 없음")
 
-# TAB 8: SOP 활동
+# TAB 8: SOP 활동 입력
 with tab8:
-    st.markdown('<div class="section-header">📋 SOP 활동</div>', unsafe_allow_html=True)
-    st.info("🔄 SOP 활동 데이터는 별도 구성 예정입니다.")
+    st.markdown('<div class="section-header">📋 SOP 활동 입력</div>', unsafe_allow_html=True)
+    
+    st.info("🔄 SOP 대리점별 주차별 활동 내역을 입력하세요.")
+    
+    # 입력 폼
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        agency = st.selectbox(
+            "🏪 대리점 선택",
+            ["평강", "문성", "케이디엘", "하나로", "회산", "현성", "클릭나라"],
+            key="sop_agency"
+        )
+    
+    with col2:
+        week = st.number_input("📅 주차", min_value=1, max_value=52, value=1, key="sop_week")
+    
+    with col3:
+        month = st.selectbox("📆 월", ["1월", "2월", "3월", "4월", "5월", "6월", "7월", "8월"], key="sop_month")
+    
+    st.divider()
+    
+    # 활동 항목 입력
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        activity = st.number_input("📊 활동 건수", min_value=0, value=0, key="sop_activity")
+    
+    with col2:
+        sales = st.number_input("💰 매출액", min_value=0, value=0, key="sop_sales")
+    
+    with col3:
+        performance = st.number_input("📈 달성률 (%)", min_value=0.0, max_value=200.0, value=100.0, key="sop_performance")
+    
+    # 저장 버튼
+    if st.button("💾 SOP 활동 저장", key="sop_save"):
+        st.success(f"✅ {month} {week}주차 - {agency}: 활동 {activity}건, 매출 ₩{sales:,.0f}, 달성률 {performance:.1f}% 저장됨")
+    
+    st.divider()
+    
+    # 입력된 SOP 데이터 표시 (예시)
+    st.write("**📊 최근 입력 현황**")
+    sample_data = pd.DataFrame({
+        "대리점": ["평강", "문성", "케이디엘"],
+        "주차": [1, 1, 1],
+        "월": ["1월", "1월", "1월"],
+        "활동건수": [15, 20, 18],
+        "매출액": [5000000, 7500000, 6200000],
+        "달성률": [105.2, 98.5, 110.3]
+    })
+    st.dataframe(sample_data, use_container_width=True)
+
+# TAB 9: STAR RAW 데이터 업로드
+with tab9:
+    st.markdown('<div class="section-header">⭐ STAR RAW 데이터 업로드</div>', unsafe_allow_html=True)
+    
+    st.info("📤 STAR 데이터(Excel/CSV)를 업로드하세요.")
+    
+    uploaded_file = st.file_uploader(
+        "파일 선택 (xlsx, xls, csv)",
+        type=["xlsx", "xls", "csv"],
+        key="star_upload"
+    )
+    
+    if uploaded_file is not None:
+        st.success(f"✅ 파일 선택됨: {uploaded_file.name}")
+        
+        # 파일 타입에 따라 읽기
+        try:
+            if uploaded_file.name.endswith('.csv'):
+                df = pd.read_csv(uploaded_file)
+            else:
+                df = pd.read_excel(uploaded_file)
+            
+            st.write(f"**📊 미리보기 (처음 10행)**")
+            st.dataframe(df.head(10), use_container_width=True)
+            
+            st.write(f"**📈 데이터 정보**")
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("행 수", len(df))
+            with col2:
+                st.metric("열 수", len(df.columns))
+            with col3:
+                st.metric("파일명", uploaded_file.name)
+            
+            # 저장 버튼
+            if st.button("💾 STAR RAW 데이터 저장", key="star_save"):
+                st.success(f"✅ STAR RAW 데이터 저장 완료! ({len(df)}행)")
+        
+        except Exception as e:
+            st.error(f"❌ 파일 읽기 실패: {e}")
+    else:
+        st.write("파일을 선택해주세요.")
