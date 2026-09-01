@@ -170,11 +170,24 @@ with tab3:
                     
                     if isinstance(channel_data, dict):
                         table_data = []
+                        
                         for key, value in channel_data.items():
-                            table_data.append({
-                                "항목": key,
-                                "값": f"{value:,.1f}" if isinstance(value, float) else f"{value:,.0f}" if isinstance(value, int) else value
-                            })
+                            if isinstance(value, dict):
+                                # 26년, 25년 등 nested dict
+                                table_data.append({
+                                    "기간": key,
+                                    "전체": f"{value.get('전체', 0):,.0f}",
+                                    "프리미엄": f"{value.get('프리미엄', 0):,.0f}",
+                                    "비중": f"{value.get('비중', 0):.1f}%"
+                                })
+                            else:
+                                # 전년비, 비중차 등
+                                table_data.append({
+                                    "기간": key,
+                                    "전체": "",
+                                    "프리미엄": "",
+                                    "비중": f"{value:.1f}" if isinstance(value, float) else f"{value:,.0f}" if isinstance(value, int) else str(value)
+                                })
                         
                         if table_data:
                             df = pd.DataFrame(table_data)
