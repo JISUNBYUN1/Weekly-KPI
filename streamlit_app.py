@@ -1,8 +1,6 @@
 import streamlit as st
 import pandas as pd
 import json
-import plotly.graph_objects as go
-import plotly.express as px
 from datetime import datetime
 
 st.set_page_config(page_title="PP3G Weekly KPI", page_icon="📊", layout="wide")
@@ -98,32 +96,45 @@ with tab2:
 
 # TAB 3
 with tab3:
-    st.markdown('<div class="section-header">💎 프리미엠 비중</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-header">💎 프리미엄 비중</div>', unsafe_allow_html=True)
     
     if data['premium']:
         st.success("✅ Premium 데이터 로드됨")
         
-        # 제품별 탭
+        # 제품별 선택
         products = list(data['premium'].keys())
         if products:
-            product = st.selectbox("제품 선택", products)
+            product = st.selectbox("📦 제품 선택", products)
             
             if product in data['premium']:
-                st.subheader(f"📊 {product} - 프리미엄 비중")
+                st.subheader(f"📊 {product}")
                 
                 product_data = data['premium'][product]
                 
-                # 채널별 데이터 표시
+                # 채널별 테이블 생성
                 channels = list(product_data.keys())
+                
                 for channel in channels:
-                    with st.expander(f"📍 {channel} 채널"):
-                        channel_data = product_data[channel]
-                        
-                        # 월별 데이터
-                        months = list(channel_data.keys())
-                        for month in months[:3]:  # 처음 3개 월 표시
-                            st.write(f"**{month}**")
-                            st.json(channel_data[month])
+                    st.write(f"**📍 {channel} 채널**")
+                    
+                    channel_data = product_data[channel]
+                    
+                    # 데이터 정리
+                    table_data = []
+                    for period, values in channel_data.items():
+                        if isinstance(values, dict):
+                            table_data.append({
+                                "기간": period,
+                                "전체": f"{values.get('전체', 0):,.0f}",
+                                "프리미엄": f"{values.get('프리미엄', 0):,.0f}",
+                                "비중": f"{values.get('비중', 0):.1f}%"
+                            })
+                    
+                    if table_data:
+                        df = pd.DataFrame(table_data)
+                        st.dataframe(df, use_container_width=True)
+                    
+                    st.divider()
     else:
         st.warning("⚠️ Premium 데이터를 로드할 수 없습니다.")
 
