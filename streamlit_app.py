@@ -207,10 +207,10 @@ def create_live_commerce_table(data_dict, title=""):
         else:
             html_row += f'<td class="number">-</td>'
         
-        # 방송효율 = 방송매출 / 소요비용 (소수점 1자리)
+        # 방송효율 = 방송매출 / 소요비용 (소수점 2자리)
         if isinstance(cost, (int, float)) and cost > 0 and isinstance(broadcast_sale, (int, float)):
-            efficiency = round(broadcast_sale / cost, 1)
-            html_row += f'<td class="number">{efficiency:.1f}</td>'
+            efficiency = round(broadcast_sale / cost, 2)
+            html_row += f'<td class="number">{efficiency:.2f}</td>'
         else:
             html_row += f'<td class="number">-</td>'
         
@@ -792,7 +792,7 @@ def dashboard():
         
         # 월별 주차 매핑
         def get_weeks_by_month(month):
-            """해당 월의 주차 리스트 반환"""
+            """해당 월의 주차 리스트 반환 (역순)"""
             month_num = int(month.replace('월', ''))
             weeks_list = []
             
@@ -804,7 +804,8 @@ def dashboard():
                 elif month_info == month_num:
                     weeks_list.append(week)
             
-            return sorted(weeks_list)
+            # 역순 정렬
+            return sorted(weeks_list, reverse=True)
         
         with st.form("weekly_form"):
             col1, col2, col3 = st.columns(3)
@@ -813,7 +814,8 @@ def dashboard():
                 input_agency = st.selectbox("거래선 선택", AGENCIES, key="input_agency")
             
             with col2:
-                input_month = st.selectbox("월 선택", ["7월", "8월"], key="input_month")
+                # 월 역순
+                input_month = st.selectbox("월 선택", ["8월", "7월"], key="input_month")
             
             with col3:
                 # 선택된 월의 주차 리스트
@@ -879,7 +881,7 @@ def dashboard():
             with col2:
                 live_sale = st.number_input("방송매출 (백만)", min_value=0.0, step=0.1, key="live_sale_input")
             with col3:
-                live_cost = st.number_input("소요비용 (백만)", min_value=0.0, step=0.1, key="live_cost_input")
+                live_cost = st.number_input("소요비용 (백만)", min_value=0.0, step=0.01, key="live_cost_input")
             
             st.write("---")
             
@@ -951,6 +953,169 @@ def dashboard():
                     
                     st.success(f"✅ {input_agency} - {input_month} {input_week} 데이터가 저장되었습니다!")
                     st.balloons()
+    
+    # 스마트스토어
+    elif current_page == "스마트":
+        st.subheader("🛒 스마트스토어 실적")
+        
+        smartstore_data = sales_data.get('smartstore', {})
+        
+        if smartstore_data:
+            # 월별 데이터만 (월_주차 제외)
+            months = [m for m in smartstore_data.keys() if '주차' not in m]
+            if months:
+                months_list = sorted(months, reverse=True)
+                selected_month = st.selectbox("월 선택", months_list, key="ss_month_select")
+                
+                if selected_month in smartstore_data:
+                    month_data = smartstore_data[selected_month]
+                    
+                    # 테이블 생성
+                    st.markdown(f"### 📊 {selected_month} 스마트스토어 실적")
+                    
+                    html = """
+                    <style>
+                        .ss-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+                        .ss-table th, .ss-table td { border: 1px solid #d0d0d0; padding: 8px 6px; text-align: center; height: 26px; }
+                        .ss-header { background: #4472c4; color: white; font-weight: 600; }
+                        .ss-total { background: #fff2cc; font-weight: 600; border-top: 2px solid #333; }
+                        .ss-data { background: #f9f9f9; }
+                        .ss-data:nth-child(even) { background: #ffffff; }
+                        .ss-agency { text-align: left; font-weight: 500; padding-left: 8px; }
+                        .ss-number { text-align: right; padding-right: 4px; font-family: 'Courier New', monospace; }
+                    </style>
+                    <table class="ss-table">
+                        <thead>
+                            <tr>
+                                <th class="ss-header">거래선</th>
+                                <th class="ss-header">고객수</th>
+                                <th class="ss-header">신규유입</th>
+                                <th class="ss-header">전월차</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                    """
+                    
+                    # 전체 행
+                    if '전체' in month_data:
+                        total = month_data['전체']
+                        html += f"""
+                            <tr class="ss-total">
+                                <td class="ss-agency">전체</td>
+                                <td class="ss-number">{total.get('고객수', 0):,}</td>
+                                <td class="ss-number">{total.get('신규유입', 0):,}</td>
+                                <td class="ss-number">{total.get('전월차', 0):+,}</td>
+                            </tr>
+                        """
+                    
+                    # 거래선별 행
+                    for agency in AGENCIES:
+                        if agency in month_data:
+                            data = month_data[agency]
+                            html += f"""
+                                <tr class="ss-data">
+                                    <td class="ss-agency">{agency}</td>
+                                    <td class="ss-number">{data.get('고객수', 0):,}</td>
+                                    <td class="ss-number">{data.get('신규유입', 0):,}</td>
+                                    <td class="ss-number">{data.get('전월차', 0):+,}</td>
+                                </tr>
+                            """
+                    
+                    html += """
+                        </tbody>
+                    </table>
+                    """
+                    st.markdown(html, unsafe_allow_html=True)
+        else:
+            st.warning("스마트스토어 데이터가 없습니다")
+    
+    # 프리미엄
+    elif current_page == "프리미엄":
+        st.subheader("💎 프리미엄 제품별 실적")
+        
+        # 프리미엄 데이터 로드
+        premium_data = {}
+        premium_products = ['냉장고', '세탁기', '식기세척기', '정수기']
+        
+        for product in premium_products:
+            try:
+                with open(f'premium_{product}.json', 'r', encoding='utf-8') as f:
+                    premium_data[product] = json.load(f)
+            except:
+                premium_data[product] = {}
+        
+        if premium_data:
+            # 제품별 Expander
+            for product in premium_products:
+                if premium_data[product]:
+                    with st.expander(f"💎 {product}", expanded=False):
+                        # 월별 선택
+                        months = sorted([m for m in premium_data[product].keys() if isinstance(premium_data[product].get(m), dict)], reverse=True)
+                        
+                        if months:
+                            selected_month = st.selectbox(f"{product} 월 선택", months, key=f"prem_{product}_month")
+                            
+                            if selected_month in premium_data[product]:
+                                month_data = premium_data[product][selected_month]
+                                
+                                # 테이블 생성
+                                st.markdown(f"### {selected_month} {product} 실적")
+                                
+                                html = f"""
+                                <style>
+                                    .prem-table {{ width: 100%; border-collapse: collapse; font-size: 13px; }}
+                                    .prem-table th, .prem-table td {{ border: 1px solid #d0d0d0; padding: 8px 6px; text-align: center; height: 26px; }}
+                                    .prem-header {{ background: #9966cc; color: white; font-weight: 600; }}
+                                    .prem-total {{ background: #fff2cc; font-weight: 600; border-top: 2px solid #333; }}
+                                    .prem-data {{ background: #f9f9f9; }}
+                                    .prem-data:nth-child(even) {{ background: #ffffff; }}
+                                    .prem-agency {{ text-align: left; font-weight: 500; padding-left: 8px; }}
+                                    .prem-number {{ text-align: right; padding-right: 4px; font-family: 'Courier New', monospace; }}
+                                </style>
+                                <table class="prem-table">
+                                    <thead>
+                                        <tr>
+                                            <th class="prem-header">거래선</th>
+                                            <th class="prem-header">매출(백만)</th>
+                                            <th class="prem-header">판매량</th>
+                                            <th class="prem-header">전월비</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                """
+                                
+                                # 합계 행
+                                if '합계' in month_data:
+                                    total = month_data['합계']
+                                    html += f"""
+                                        <tr class="prem-total">
+                                            <td class="prem-agency">합계</td>
+                                            <td class="prem-number">{total.get('매출', 0):,.1f}</td>
+                                            <td class="prem-number">{total.get('판매량', 0):,}</td>
+                                            <td class="prem-number">{total.get('전월비', '0'):}</td>
+                                        </tr>
+                                    """
+                                
+                                # 거래선별 행
+                                for agency in AGENCIES:
+                                    if agency in month_data and agency != '합계':
+                                        data = month_data[agency]
+                                        html += f"""
+                                            <tr class="prem-data">
+                                                <td class="prem-agency">{agency}</td>
+                                                <td class="prem-number">{data.get('매출', 0):,.1f}</td>
+                                                <td class="prem-number">{data.get('판매량', 0):,}</td>
+                                                <td class="prem-number">{data.get('전월비', '0'):}</td>
+                                            </tr>
+                                        """
+                                
+                                html += """
+                                    </tbody>
+                                </table>
+                                """
+                                st.markdown(html, unsafe_allow_html=True)
+        else:
+            st.warning("프리미엄 데이터가 없습니다")
     
     # 거래선 현황
     elif current_page == "거래선현황":
