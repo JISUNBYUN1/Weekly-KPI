@@ -39,43 +39,24 @@ st.markdown(f"**업데이트**: {datetime.now().strftime('%Y.%m.%d %H:%M')}")
 
 t = st.tabs(["전체", "FCST", "프리미엄", "스마트스토어", "라이브", "어필", "PPM", "SOP활동", "SOP입력", "STAR"])
 
-def get_full_table_rows(model_data):
-    rows = []
-    months = sorted(model_data.get('2025', {}).keys(), key=lambda x: int(x.replace("월", "")) if "월" in x else 0)
+def create_month_table(model_data):
+    """월을 가로로 배열한 테이블 생성"""
+    months = sorted(model_data.get('SALES', {}).keys(), key=lambda x: int(x.replace("월", "")) if "월" in x else 0)
+    
+    data_dict = {}
     for month in months:
-        row = {
-            "월": month,
-            "실적": f"{model_data.get('2025', {}).get(month, 0):,.0f}",
-            "경영대비": f"{model_data.get('ANNUAL', {}).get(month, 0):,.0f}",
-            "실행대비": f"{model_data.get('ACTION', {}).get(month, 0):,.0f}",
-            "전년대비": f"{model_data.get('SALES', {}).get(month, 0):,.0f}"
-        }
-        rows.append(row)
-    return rows
-
-def get_channel_total(models):
-    total = {"2025": {}, "ANNUAL": {}, "ACTION": {}, "SALES": {}}
-    for model_data in models.values():
-        for key in ["2025", "ANNUAL", "ACTION", "SALES"]:
-            if key in model_data:
-                for month, value in model_data[key].items():
-                    if month not in total[key]:
-                        total[key][month] = 0
-                    if isinstance(value, (int, float)):
-                        total[key][month] += value
-    return total
-
-def render_channel_total(channel_total):
-    rows = []
-    for month in sorted(channel_total["2025"].keys(), key=lambda x: int(x.replace("월", "")) if "월" in x else 0):
-        rows.append({
-            "월": month,
-            "실적": f"{channel_total['2025'][month]:,.0f}",
-            "경영대비": f"{channel_total['ANNUAL'][month]:,.0f}",
-            "실행대비": f"{channel_total['ACTION'][month]:,.0f}",
-            "전년대비": f"{channel_total['SALES'][month]:,.0f}"
-        })
-    return rows
+        actual = model_data.get('SALES', {}).get(month, 0)
+        annual = model_data.get('ANNUAL', {}).get(month, 1)
+        action = model_data.get('ACTION', {}).get(month, 1)
+        prev_year = model_data.get('2025', {}).get(month, 1)
+        
+        data_dict[f"{month}\n실적(수량)"] = f"{actual:,.0f}"
+        data_dict[f"{month}\n경영대비(%)"] = f"{(actual/annual):.2f}%" if annual > 0 else "-"
+        data_dict[f"{month}\n실행대비(%)"] = f"{(actual/action):.2f}%" if action > 0 else "-"
+        # 전년대비(%) = ((2026년 / 2025년) - 1) × 100
+        data_dict[f"{month}\n전년대비(%)"] = f"{((actual/prev_year - 1) * 100):.2f}%" if prev_year > 0 else "-"
+    
+    return pd.DataFrame([data_dict]).T
 
 # TAB 1
 with t[0]:
@@ -85,9 +66,9 @@ with t[0]:
         for channel_data in data['bizplan'].values():
             for product_name, product_models in channel_data.items():
                 if product_name not in all_products:
-                    all_products[product_name] = {"2025": {}, "ANNUAL": {}, "ACTION": {}, "SALES": {}}
+                    all_products[product_name] = {"SALES": {}, "ANNUAL": {}, "ACTION": {}, "2025": {}}
                 for model_data in product_models.values():
-                    for key in ["2025", "ANNUAL", "ACTION", "SALES"]:
+                    for key in ["SALES", "ANNUAL", "ACTION", "2025"]:
                         if key in model_data:
                             for month, value in model_data[key].items():
                                 if month not in all_products[product_name][key]:
@@ -95,24 +76,15 @@ with t[0]:
                                 if isinstance(value, (int, float)):
                                     all_products[product_name][key][month] += value
         
-        grand_total = {"2025": {}, "ANNUAL": {}, "ACTION": {}, "SALES": {}}
+        grand_total = {"SALES": {}, "ANNUAL": {}, "ACTION": {}, "2025": {}}
         for product_data in all_products.values():
-            for key in ["2025", "ANNUAL", "ACTION", "SALES"]:
+            for key in ["SALES", "ANNUAL", "ACTION", "2025"]:
                 for month, value in product_data[key].items():
                     if month not in grand_total[key]:
                         grand_total[key][month] = 0
                     grand_total[key][month] += value
         
-        rows = []
-        for month in sorted(grand_total["2025"].keys(), key=lambda x: int(x.replace("월", "")) if "월" in x else 0):
-            rows.append({
-                "월": month,
-                "실적": f"{grand_total['2025'][month]:,.0f}",
-                "경영대비": f"{grand_total['ANNUAL'][month]:,.0f}",
-                "실행대비": f"{grand_total['ACTION'][month]:,.0f}",
-                "전년대비": f"{grand_total['SALES'][month]:,.0f}"
-            })
-        st.dataframe(pd.DataFrame(rows), width='stretch')
+        st.dataframe(create_month_table(grand_total), width='stretch')
 
 # TAB 2 - FCST 현황
 with t[1]:
@@ -122,9 +94,9 @@ with t[1]:
         for channel_data in data['bizplan'].values():
             for product_name, product_models in channel_data.items():
                 if product_name not in all_products:
-                    all_products[product_name] = {"2025": {}, "ANNUAL": {}, "ACTION": {}, "SALES": {}}
+                    all_products[product_name] = {"SALES": {}, "ANNUAL": {}, "ACTION": {}, "2025": {}}
                 for model_data in product_models.values():
-                    for key in ["2025", "ANNUAL", "ACTION", "SALES"]:
+                    for key in ["SALES", "ANNUAL", "ACTION", "2025"]:
                         if key in model_data:
                             for month, value in model_data[key].items():
                                 if month not in all_products[product_name][key]:
@@ -132,23 +104,28 @@ with t[1]:
                                 if isinstance(value, (int, float)):
                                     all_products[product_name][key][month] += value
         
+        # 디폴트: 전체 품목 합계
+        st.subheader("📊 전체 현황 (기본)")
+        grand_total = {"SALES": {}, "ANNUAL": {}, "ACTION": {}, "2025": {}}
+        for product_data in all_products.values():
+            for key in ["SALES", "ANNUAL", "ACTION", "2025"]:
+                for month, value in product_data[key].items():
+                    if month not in grand_total[key]:
+                        grand_total[key][month] = 0
+                    grand_total[key][month] += value
+        
+        st.dataframe(create_month_table(grand_total), width='stretch')
+        st.divider()
+        
         # 제품별로 expander 처리
+        st.subheader("📦 제품별 상세")
         for product_name in sorted(all_products.keys()):
             with st.expander(f"📦 {product_name}", expanded=False):
                 product_data = all_products[product_name]
                 
-                # 제품 전체 테이블
+                # 제품 전체
                 st.write(f"**{product_name} 전체**")
-                rows = []
-                for month in sorted(product_data["2025"].keys(), key=lambda x: int(x.replace("월", "")) if "월" in x else 0):
-                    rows.append({
-                        "월": month,
-                        "실적": f"{product_data['2025'][month]:,.0f}",
-                        "경영대비": f"{product_data['ANNUAL'][month]:,.0f}",
-                        "실행대비": f"{product_data['ACTION'][month]:,.0f}",
-                        "전년대비": f"{product_data['SALES'][month]:,.0f}"
-                    })
-                st.dataframe(pd.DataFrame(rows), width='stretch')
+                st.dataframe(create_month_table(product_data), width='stretch')
                 st.divider()
                 
                 # 채널별
@@ -158,24 +135,32 @@ with t[1]:
                         continue
                     
                     models = channel_data[product_name]
-                    channel_total = get_channel_total(models)
+                    channel_total = {"SALES": {}, "ANNUAL": {}, "ACTION": {}, "2025": {}}
                     
-                    # 냉장고, 의류케어, 조리기기: 모든 채널이 expander (모델 여러 개)
-                    # 김치냉장고, 정수기: expander 없음 (모델 1개)
+                    for model_data in models.values():
+                        for key in ["SALES", "ANNUAL", "ACTION", "2025"]:
+                            if key in model_data:
+                                for month, value in model_data[key].items():
+                                    if month not in channel_total[key]:
+                                        channel_total[key][month] = 0
+                                    if isinstance(value, (int, float)):
+                                        channel_total[key][month] += value
+                    
+                    # 냉장고, 의류케어, 조리기기: 모든 채널이 expander
                     if product_name in ["냉장고", "의류케어", "조리기기"]:
                         with st.expander(f"🔽 {channel_name}"):
                             st.write(f"**{channel_name} 전체**")
-                            st.dataframe(pd.DataFrame(render_channel_total(channel_total)), width='stretch')
+                            st.dataframe(create_month_table(channel_total), width='stretch')
                             st.divider()
                             
                             # 모델들
                             for model_name, model_data in sorted(models.items()):
                                 st.write(f"  **{model_name}**")
-                                st.dataframe(pd.DataFrame(get_full_table_rows(model_data)), width='stretch')
+                                st.dataframe(create_month_table(model_data), width='stretch')
                     else:
                         # 김치냉장고, 정수기: expander 없음
                         st.write(f"**{channel_name}**")
-                        st.dataframe(pd.DataFrame(render_channel_total(channel_total)), width='stretch')
+                        st.dataframe(create_month_table(channel_total), width='stretch')
 
 # TAB 3
 with t[2]:
