@@ -39,24 +39,43 @@ st.markdown(f"**업데이트**: {datetime.now().strftime('%Y.%m.%d %H:%M')}")
 
 t = st.tabs(["전체", "FCST", "프리미엄", "스마트스토어", "라이브", "어필", "PPM", "SOP활동", "SOP입력", "STAR"])
 
-def create_month_table(model_data):
-    """월을 가로로 배열한 테이블 생성"""
-    months = sorted(model_data.get('SALES', {}).keys(), key=lambda x: int(x.replace("월", "")) if "월" in x else 0)
+def create_summary_table(all_products_data):
+    """제품별 합계 테이블 생성 - 26년 전체"""
+    rows = []
     
-    data_dict = {}
-    for month in months:
-        actual = model_data.get('SALES', {}).get(month, 0)
-        annual = model_data.get('ANNUAL', {}).get(month, 1)
-        action = model_data.get('ACTION', {}).get(month, 1)
-        prev_year = model_data.get('2025', {}).get(month, 1)
+    # 전체 합계 행 추가
+    grand_total_sales = sum(p["SALES"].get("합계", 0) for p in all_products_data.values() if "SALES" in p)
+    grand_total_annual = sum(p["ANNUAL"].get("합계", 0) for p in all_products_data.values() if "ANNUAL" in p)
+    grand_total_action = sum(p["ACTION"].get("합계", 0) for p in all_products_data.values() if "ACTION" in p)
+    grand_total_2025 = sum(p["2025"].get("합계", 0) for p in all_products_data.values() if "2025" in p)
+    
+    rows.append({
+        "제품": "그룹 계",
+        "실적(원)": f"{grand_total_sales:,.0f}",
+        "경영대비(%)": f"{(grand_total_sales/grand_total_annual):.2f}%" if grand_total_annual > 0 else "-",
+        "실행대비(%)": f"{(grand_total_sales/grand_total_action):.2f}%" if grand_total_action > 0 else "-",
+        "전년대비(%)": f"{((grand_total_sales/grand_total_2025 - 1) * 100):.2f}%" if grand_total_2025 > 0 else "-"
+    })
+    
+    # 제품별 행 추가
+    for product_name in sorted(all_products_data.keys()):
+        product_data = all_products_data[product_name]
         
-        data_dict[f"{month}\n실적(수량)"] = f"{actual:,.0f}"
-        data_dict[f"{month}\n경영대비(%)"] = f"{(actual/annual):.2f}%" if annual > 0 else "-"
-        data_dict[f"{month}\n실행대비(%)"] = f"{(actual/action):.2f}%" if action > 0 else "-"
-        # 전년대비(%) = ((2026년 / 2025년) - 1) × 100
-        data_dict[f"{month}\n전년대비(%)"] = f"{((actual/prev_year - 1) * 100):.2f}%" if prev_year > 0 else "-"
+        # 각 제품의 전체 월 합계
+        sales_total = sum(product_data.get("SALES", {}).values())
+        annual_total = sum(product_data.get("ANNUAL", {}).values())
+        action_total = sum(product_data.get("ACTION", {}).values())
+        prev_year_total = sum(product_data.get("2025", {}).values())
+        
+        rows.append({
+            "제품": product_name,
+            "실적(원)": f"{sales_total:,.0f}",
+            "경영대비(%)": f"{(sales_total/annual_total):.2f}%" if annual_total > 0 else "-",
+            "실행대비(%)": f"{(sales_total/action_total):.2f}%" if action_total > 0 else "-",
+            "전년대비(%)": f"{((sales_total/prev_year_total - 1) * 100):.2f}%" if prev_year_total > 0 else "-"
+        })
     
-    return pd.DataFrame([data_dict]).T
+    return pd.DataFrame(rows)
 
 # TAB 1
 with t[0]:
@@ -76,15 +95,7 @@ with t[0]:
                                 if isinstance(value, (int, float)):
                                     all_products[product_name][key][month] += value
         
-        grand_total = {"SALES": {}, "ANNUAL": {}, "ACTION": {}, "2025": {}}
-        for product_data in all_products.values():
-            for key in ["SALES", "ANNUAL", "ACTION", "2025"]:
-                for month, value in product_data[key].items():
-                    if month not in grand_total[key]:
-                        grand_total[key][month] = 0
-                    grand_total[key][month] += value
-        
-        st.dataframe(create_month_table(grand_total), width='stretch')
+        st.dataframe(create_summary_table(all_products), width='stretch', hide_index=True)
 
 # TAB 2 - FCST 현황
 with t[1]:
@@ -104,17 +115,9 @@ with t[1]:
                                 if isinstance(value, (int, float)):
                                     all_products[product_name][key][month] += value
         
-        # 디폴트: 전체 품목 합계
-        st.subheader("📊 전체 현황 (기본)")
-        grand_total = {"SALES": {}, "ANNUAL": {}, "ACTION": {}, "2025": {}}
-        for product_data in all_products.values():
-            for key in ["SALES", "ANNUAL", "ACTION", "2025"]:
-                for month, value in product_data[key].items():
-                    if month not in grand_total[key]:
-                        grand_total[key][month] = 0
-                    grand_total[key][month] += value
-        
-        st.dataframe(create_month_table(grand_total), width='stretch')
+        # 디폴트: 전체 합계 (제품별)
+        st.subheader("📊 26년 계")
+        st.dataframe(create_summary_table(all_products), width='stretch', hide_index=True)
         st.divider()
         
         # 제품별로 expander 처리
@@ -125,7 +128,8 @@ with t[1]:
                 
                 # 제품 전체
                 st.write(f"**{product_name} 전체**")
-                st.dataframe(create_month_table(product_data), width='stretch')
+                product_summary = {product_name: product_data}
+                st.dataframe(create_summary_table(product_summary), width='stretch', hide_index=True)
                 st.divider()
                 
                 # 채널별
@@ -150,17 +154,20 @@ with t[1]:
                     if product_name in ["냉장고", "의류케어", "조리기기"]:
                         with st.expander(f"🔽 {channel_name}"):
                             st.write(f"**{channel_name} 전체**")
-                            st.dataframe(create_month_table(channel_total), width='stretch')
+                            channel_summary = {channel_name: channel_total}
+                            st.dataframe(create_summary_table(channel_summary), width='stretch', hide_index=True)
                             st.divider()
                             
                             # 모델들
                             for model_name, model_data in sorted(models.items()):
                                 st.write(f"  **{model_name}**")
-                                st.dataframe(create_month_table(model_data), width='stretch')
+                                model_summary = {model_name: model_data}
+                                st.dataframe(create_summary_table(model_summary), width='stretch', hide_index=True)
                     else:
                         # 김치냉장고, 정수기: expander 없음
                         st.write(f"**{channel_name}**")
-                        st.dataframe(create_month_table(channel_total), width='stretch')
+                        channel_summary = {channel_name: channel_total}
+                        st.dataframe(create_summary_table(channel_summary), width='stretch', hide_index=True)
 
 # TAB 3
 with t[2]:
