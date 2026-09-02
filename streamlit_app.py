@@ -90,6 +90,105 @@ def login_page():
         else:
             st.error("이름을 입력해주세요")
 
+# 값 포매팅 함수
+def format_display_value(val):
+    """표시용 값 포매팅 (0->-, 음수->△)"""
+    if val is None or val == "":
+        return "-"
+    if isinstance(val, str):
+        return val
+    if isinstance(val, (int, float)):
+        if val == 0:
+            return "-"
+        elif val < 0:
+            if isinstance(val, float) and val > -1:
+                return f"△{abs(val):.1f}%"
+            return f"△{int(abs(val))}" if val == int(val) else f"△{abs(val):.2f}"
+        else:
+            if isinstance(val, float) and val < 1:
+                return f"{val:.2f}"
+            return f"{int(val):,}" if val == int(val) else f"{val:,.2f}"
+    return str(val)
+
+# 어필리에이트 테이블 생성
+def create_affiliate_table(data_dict, title=""):
+    """어필리에이트 4단계 계층형 테이블 생성"""
+    st.markdown(f"### {title}")
+    
+    html = """
+    <style>
+        .affiliate-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+        .affiliate-table th, .affiliate-table td { border: 1px solid #d0d0d0; padding: 5px 4px; text-align: center; height: 22px; }
+        .header-tier1 { background: #d9e1f2; font-weight: 600; }
+        .header-tier2 { background: #e7eef7; font-weight: 500; font-size: 10px; }
+        .total-row { background: #fff2cc; font-weight: 600; border-top: 2px solid #333; }
+        .data-row { background: #f9f9f9; }
+        .data-row:nth-child(even) { background: #ffffff; }
+        .agency-col { text-align: left; font-weight: 500; padding-left: 8px; }
+        .number { text-align: right; padding-right: 4px; font-family: 'Courier New', monospace; }
+    </style>
+    <table class="affiliate-table">
+        <thead>
+            <tr>
+                <th rowspan="2" class="header-tier1">거래선</th>
+                <th colspan="4" class="header-tier1">어필리에이트</th>
+                <th colspan="6" class="header-tier1">쇼핑커넥트</th>
+                <th colspan="4" class="header-tier1">공동구매</th>
+            </tr>
+            <tr>
+                <th class="header-tier2">크리<br/>운영수</th>
+                <th class="header-tier2">운영<br/>모델</th>
+                <th class="header-tier2">주문<br/>건수</th>
+                <th class="header-tier2">주문금액<br/>(백만)</th>
+                <th class="header-tier2">크리</th>
+                <th class="header-tier2">운영</th>
+                <th class="header-tier2">유입수</th>
+                <th class="header-tier2">상품주문</th>
+                <th class="header-tier2">전환율<br/>(%)</th>
+                <th class="header-tier2">주문금액<br/>(백만)</th>
+                <th class="header-tier2">크리</th>
+                <th class="header-tier2">운영</th>
+                <th class="header-tier2">상품주문</th>
+                <th class="header-tier2">주문금액<br/>(백만)</th>
+            </tr>
+        </thead>
+        <tbody>
+    """
+    
+    def add_row(agency_name, is_total=False, data_item=None):
+        row_class = "total-row" if is_total else "data-row"
+        html_row = f'<tr class="{row_class}"><td class="agency-col">{agency_name}</td>'
+        if data_item:
+            aff = data_item.get("어필리에이트", {})
+            html_row += f'<td class="number">{format_display_value(aff.get("크리에이터"))}</td>'
+            html_row += f'<td class="number">{format_display_value(aff.get("운영모델"))}</td>'
+            html_row += f'<td class="number">{format_display_value(aff.get("주문건수"))}</td>'
+            html_row += f'<td class="number">{format_display_value(aff.get("주문금액"))}</td>'
+            shop = data_item.get("쇼핑커넥트", {})
+            html_row += f'<td class="number">{format_display_value(shop.get("크리에이터"))}</td>'
+            html_row += f'<td class="number">{format_display_value(shop.get("운영모델"))}</td>'
+            html_row += f'<td class="number">{format_display_value(shop.get("유입수"))}</td>'
+            html_row += f'<td class="number">{format_display_value(shop.get("상품주문"))}</td>'
+            conversion = shop.get("전환율")
+            conv_str = "-" if (conversion == 0 or conversion is None) else f"{conversion:.1%}" if conversion < 1 else f"{conversion:.2f}%"
+            html_row += f'<td class="number">{conv_str}</td>'
+            html_row += f'<td class="number">{format_display_value(shop.get("주문금액"))}</td>'
+            joint = data_item.get("공동구매", {})
+            html_row += f'<td class="number">{format_display_value(joint.get("크리에이터"))}</td>'
+            html_row += f'<td class="number">{format_display_value(joint.get("운영모델"))}</td>'
+            html_row += f'<td class="number">{format_display_value(joint.get("상품주문"))}</td>'
+            html_row += f'<td class="number">{format_display_value(joint.get("주문금액"))}</td>'
+        html_row += '</tr>'
+        return html_row
+    
+    if "계" in data_dict:
+        html += add_row("계", is_total=True, data_item=data_dict["계"])
+    for agency in AGENCIES:
+        if agency in data_dict:
+            html += add_row(agency, is_total=False, data_item=data_dict[agency])
+    html += "</tbody></table>"
+    st.markdown(html, unsafe_allow_html=True)
+
 # 메인 대시보드
 def dashboard():
     user_name = st.session_state.user_name
@@ -250,21 +349,34 @@ def dashboard():
     
     # 어필리에이트
     elif current_page == "어필":
-        st.subheader("🤝 어필리에이트")
+        st.subheader("🤝 어필리에이트 실적")
         
-        if sales_data['affiliate']:
-            months = list(sales_data['affiliate'].keys())
-            selected_month = st.selectbox("월", months, key="aff_month")
+        affiliate_data = sales_data.get('affiliate', {})
+        
+        if affiliate_data:
+            tab1, tab2 = st.tabs(["📅 월별", "📆 주차별"])
             
-            if selected_month in sales_data['affiliate']:
-                channels = list(sales_data['affiliate'][selected_month].keys())
-                selected_channel = st.selectbox("채널", channels, key="aff_channel")
-                
-                st.dataframe(pd.DataFrame([
-                    {"대리점": k, **v} 
-                    for k, v in sales_data['affiliate'][selected_month][selected_channel].items() 
-                    if isinstance(v, dict)
-                ]), use_container_width=True, hide_index=True)
+            with tab1:
+                st.write("#### 월별 실적")
+                months = affiliate_data.get('월별', {})
+                if months:
+                    selected_month = st.selectbox("월 선택", list(months.keys()), key="month_select")
+                    if selected_month in months:
+                        create_affiliate_table(months[selected_month], f"📊 {selected_month} 어필리에이트 실적")
+                else:
+                    st.warning("월별 데이터가 없습니다")
+            
+            with tab2:
+                st.write("#### 주차별 실적")
+                weeks = affiliate_data.get('주차별', {})
+                if weeks:
+                    selected_week = st.selectbox("주차 선택", list(weeks.keys()), key="week_select")
+                    if selected_week in weeks:
+                        create_affiliate_table(weeks[selected_week], f"📊 {selected_week} 어필리에이트 실적")
+                else:
+                    st.warning("주차별 데이터가 없습니다")
+        else:
+            st.warning("어필리에이트 데이터가 없습니다")
     
     # PPM
     elif current_page == "PPM":
