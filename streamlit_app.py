@@ -188,7 +188,12 @@ def create_affiliate_table(data_dict, title=""):
             html_row += f'<td class="number">{format_display_value(shop.get("유입수"))}</td>'
             html_row += f'<td class="number">{format_display_value(shop.get("상품주문"))}</td>'
             conversion = shop.get("전환율")
-            conv_str = "-" if (conversion == 0 or conversion is None) else f"{conversion:.2f}%"
+            if conversion is None or conversion == 0:
+                conv_str = "-"
+            elif conversion < 0:
+                conv_str = f"△{abs(conversion):.2f}%"
+            else:
+                conv_str = f"{conversion:.2f}%"
             html_row += f'<td class="number">{conv_str}</td>'
             html_row += f'<td class="number">{format_display_value(shop.get("주문금액"))}</td>'
             joint = data_item.get("공동구매", {})
@@ -251,46 +256,130 @@ def dashboard():
     
     # 전체
     if current_page == "전체":
-        st.subheader("📊 전체 현황")
+        st.subheader("📊 대시보드 SUMMARY")
         
-        if sales_data['bizplan']:
-            all_products = {}
-            for channel_data in sales_data['bizplan'].values():
-                for product_name, product_models in channel_data.items():
-                    if product_name not in all_products:
-                        all_products[product_name] = {"SALES": {}, "ANNUAL": {}, "ACTION": {}, "2025": {}}
-                    for model_data in product_models.values():
-                        for key in ["SALES", "ANNUAL", "ACTION", "2025"]:
-                            if key in model_data:
-                                for month, value in model_data[key].items():
-                                    if month not in all_products[product_name][key]:
-                                        all_products[product_name][key][month] = 0
-                                    if isinstance(value, (int, float)):
-                                        all_products[product_name][key][month] += value
-            
-            rows = []
-            grand_total_sales = sum(sum(p.get("SALES", {}).values()) for p in all_products.values())
-            grand_total_annual = sum(sum(p.get("ANNUAL", {}).values()) for p in all_products.values())
-            
-            rows.append({
-                "제품": "그룹 계",
-                "실적(수량)": f"{grand_total_sales:,.0f}",
-                "경영비(%)": f"{(grand_total_sales/grand_total_annual):.2f}%" if grand_total_annual > 0 else "-"
-            })
-            
-            for product_name in PRODUCT_ORDER:
-                if product_name in all_products:
-                    product_data = all_products[product_name]
-                    sales_total = sum(product_data.get("SALES", {}).values())
-                    annual_total = sum(product_data.get("ANNUAL", {}).values())
+        # 탭 생성
+        tab1, tab2, tab3, tab4, tab5 = st.tabs(["📈 FCST", "🛒 스마트스토어", "📹 라이브커머스", "🤝 어필리에이트", "💎 프리미엄"])
+        
+        # Tab 1: FCST
+        with tab1:
+            st.write("#### FCST 현황")
+            if sales_data['bizplan']:
+                all_products = {}
+                for channel_data in sales_data['bizplan'].values():
+                    for product_name, product_models in channel_data.items():
+                        if product_name not in all_products:
+                            all_products[product_name] = {"SALES": {}, "ANNUAL": {}, "ACTION": {}, "2025": {}}
+                        for model_data in product_models.values():
+                            for key in ["SALES", "ANNUAL", "ACTION", "2025"]:
+                                if key in model_data:
+                                    for month, value in model_data[key].items():
+                                        if month not in all_products[product_name][key]:
+                                            all_products[product_name][key][month] = 0
+                                        if isinstance(value, (int, float)):
+                                            all_products[product_name][key][month] += value
+                
+                # 최신월만 표시
+                months = sorted(set().union(*[p.get("SALES", {}).keys() for p in all_products.values()]),
+                               key=lambda x: int(x.replace("월", "")) if "월" in x else 0, reverse=True)
+                if months:
+                    latest_month = months[0]
+                    st.write(f"**{latest_month} 현황**")
+                    
+                    rows = []
+                    grand_total_sales = sum(all_products[pn].get("SALES", {}).get(latest_month, 0) for pn in all_products)
+                    grand_total_annual = sum(all_products[pn].get("ANNUAL", {}).get(latest_month, 0) for pn in all_products)
                     
                     rows.append({
-                        "제품": product_name,
-                        "실적(수량)": f"{sales_total:,.0f}",
-                        "경영비(%)": f"{(sales_total/annual_total):.2f}%" if annual_total > 0 else "-"
+                        "제품": "그룹 계",
+                        "실적(수량)": f"{grand_total_sales:,.0f}",
+                        "경영비(%)": f"{(grand_total_sales/grand_total_annual):.2f}%" if grand_total_annual > 0 else "-"
                     })
-            
-            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+                    
+                    for product_name in PRODUCT_ORDER:
+                        if product_name in all_products:
+                            sales = all_products[product_name].get("SALES", {}).get(latest_month, 0)
+                            annual = all_products[product_name].get("ANNUAL", {}).get(latest_month, 1)
+                            rows.append({
+                                "제품": product_name,
+                                "실적(수량)": f"{sales:,.0f}",
+                                "경영비(%)": f"{(sales/annual):.2f}%" if annual > 0 else "-"
+                            })
+                    
+                    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        
+        # Tab 2: 스마트스토어
+        with tab2:
+            st.write("#### 스마트스토어 현황")
+            if sales_data['smartstore'] and '월별' in sales_data['smartstore']:
+                months = sorted(list(sales_data['smartstore']['월별'].keys()), reverse=True)
+                if months:
+                    latest_month = months[0]
+                    st.write(f"**{latest_month} 현황**")
+                    
+                    st.dataframe(pd.DataFrame([
+                        {"거래선": k, **v} 
+                        for k, v in sales_data['smartstore']['월별'][latest_month].items() 
+                        if isinstance(v, dict)
+                    ]), use_container_width=True, hide_index=True)
+        
+        # Tab 3: 라이브커머스
+        with tab3:
+            st.write("#### 라이브커머스 현황")
+            if sales_data['live_commerce'] and '월별' in sales_data['live_commerce']:
+                months = sorted(list(sales_data['live_commerce']['월별'].keys()), reverse=True)
+                if months:
+                    latest_month = months[0]
+                    st.write(f"**{latest_month} 현황**")
+                    
+                    st.dataframe(pd.DataFrame([
+                        {"거래선": k, **v} 
+                        for k, v in sales_data['live_commerce']['월별'][latest_month].items() 
+                        if isinstance(v, dict)
+                    ]), use_container_width=True, hide_index=True)
+        
+        # Tab 4: 어필리에이트
+        with tab4:
+            st.write("#### 어필리에이트 현황")
+            affiliate_data = sales_data.get('affiliate', {})
+            if affiliate_data:
+                months = affiliate_data.get('월별', {})
+                if months:
+                    months_list = sorted(list(months.keys()), reverse=True)
+                    if months_list:
+                        latest_month = months_list[0]
+                        st.write(f"**{latest_month} 현황**")
+                        create_affiliate_table(months[latest_month], "")
+        
+        # Tab 5: 프리미엄
+        with tab5:
+            st.write("#### 프리미엄 현황")
+            if sales_data['premium']:
+                premium_data = sales_data['premium']
+                products = list(premium_data.keys())[:3]  # 최대 3개 제품만 표시
+                
+                for product in products:
+                    st.write(f"**{product}**")
+                    product_info = premium_data[product]
+                    
+                    if isinstance(product_info, dict):
+                        if '월별' in product_info:
+                            months = sorted(list(product_info['월별'].keys()), reverse=True)
+                            if months:
+                                latest_month = months[0]
+                                month_data = product_info['월별'][latest_month]
+                                st.dataframe(pd.DataFrame([
+                                    {"거래선": k, **v} 
+                                    for k, v in month_data.items() 
+                                    if isinstance(v, dict)
+                                ]), use_container_width=True, hide_index=True)
+                        else:
+                            st.write(product_info)
+                    elif isinstance(product_info, list):
+                        if product_info and isinstance(product_info[0], dict):
+                            st.dataframe(pd.DataFrame(product_info), use_container_width=True, hide_index=True)
+            else:
+                st.info("프리미엄 데이터가 없습니다")
     
     # FCST
     elif current_page == "FCST":
@@ -312,7 +401,7 @@ def dashboard():
                                         all_products[product_name][key][month] += value
             
             months = sorted(set().union(*[p.get("SALES", {}).keys() for p in all_products.values()]),
-                           key=lambda x: int(x.replace("월", "")) if "월" in x else 0)
+                           key=lambda x: int(x.replace("월", "")) if "월" in x else 0, reverse=True)
             
             selected_month = st.selectbox("월 선택", months)
             
@@ -334,7 +423,49 @@ def dashboard():
     # 프리미엄
     elif current_page == "프리미엄":
         st.subheader("💎 프리미엄 비중")
-        st.info("프리미엄 데이터 준비 중")
+        
+        if sales_data['premium']:
+            # 제품별로 데이터 표시
+            premium_data = sales_data['premium']
+            
+            # 제품 목록 추출
+            products = list(premium_data.keys())
+            
+            if products:
+                st.write(f"**총 {len(products)}개 제품 데이터**")
+                
+                for product in products:
+                    product_info = premium_data[product]
+                    
+                    with st.expander(f"📊 {product}"):
+                        # 데이터가 dict 형식인 경우
+                        if isinstance(product_info, dict):
+                            # 월별 데이터가 있는 경우
+                            if '월별' in product_info:
+                                months = sorted(list(product_info['월별'].keys()), reverse=True)
+                                selected_month = st.selectbox("월", months, key=f"premium_{product}_month")
+                                
+                                month_data = product_info['월별'][selected_month]
+                                st.dataframe(pd.DataFrame([
+                                    {"거래선": k, **v} 
+                                    for k, v in month_data.items() 
+                                    if isinstance(v, dict)
+                                ]), use_container_width=True, hide_index=True)
+                            else:
+                                # 직접적인 데이터 표시
+                                st.write(product_info)
+                        # 리스트 형식인 경우
+                        elif isinstance(product_info, list):
+                            if product_info and isinstance(product_info[0], dict):
+                                st.dataframe(pd.DataFrame(product_info), use_container_width=True, hide_index=True)
+                            else:
+                                st.write(product_info)
+                        else:
+                            st.write(product_info)
+            else:
+                st.info("프리미엄 제품 데이터가 없습니다")
+        else:
+            st.info("프리미엄 데이터를 불러올 수 없습니다")
     
     # 스마트스토어
     elif current_page == "스마트스토어":
@@ -590,7 +721,10 @@ def dashboard():
                         with st.form("edit_weekly_form"):
                             col1, col2, col3 = st.columns(3)
                             with col1:
-                                edit_month = st.selectbox("월", ["7월", "8월"], value=data.get('월', '7월'), key="edit_month")
+                                months_list = ["7월", "8월"]
+                                current_month = data.get('월', '7월')
+                                month_index = months_list.index(current_month) if current_month in months_list else 0
+                                edit_month = st.selectbox("월", months_list, index=month_index, key="edit_month")
                             
                             st.write("---")
                             st.subheader("1️⃣ 스마트스토어")
@@ -681,11 +815,6 @@ def dashboard():
                 
                 st.write("---")
                 
-                # 전체 평가
-                col1, col2 = st.columns([0.5, 0.5])
-                with col1:
-                    overall_type = st.radio("전체 평가", ["✅ 우수", "⚠️ 확인요청"], horizontal=True, key=f"fb_overall_{feedback_agency}_{week}")
-                
                 # 각 항목별 피드백
                 st.subheader("📝 세부 피드백")
                 
@@ -715,7 +844,6 @@ def dashboard():
                         feedback_data[feedback_agency] = {}
                     
                     feedback_data[feedback_agency][week] = {
-                        "overall_type": "praise" if "우수" in overall_type else "request",
                         "스마트스토어": ss_comment,
                         "어필리에이트": af_comment,
                         "라이브커머스": lc_comment,
