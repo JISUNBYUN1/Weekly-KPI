@@ -401,7 +401,8 @@ def dashboard():
                                 for agency_data in sum_data.values():
                                     for channel in ["어필리에이트", "쇼핑커넥트", "공동구매"]:
                                         for key, val in agency_data[channel].items():
-                                            if key != "전환율" and isinstance(val, (int, float)):\n                                                total_sum[channel][key] += val
+                                            if key != "전환율" and isinstance(val, (int, float)):
+                                                total_sum[channel][key] += val
                                 
                                 if total_sum["쇼핑커넥트"]["유입수"] > 0:
                                     total_sum["쇼핑커넥트"]["전환율"] = (total_sum["쇼핑커넥트"]["상품주문"] / total_sum["쇼핑커넥트"]["유입수"]) * 100
