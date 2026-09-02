@@ -17,7 +17,7 @@ if "page" not in st.session_state:
     st.session_state.page = "전체"
 
 # 데이터 로드
-@st.cache_data
+@st.cache_data(ttl=3600)
 def load_sales_data():
     """KPI 데이터 로드"""
     data = {}
