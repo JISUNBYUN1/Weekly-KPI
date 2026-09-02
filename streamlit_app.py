@@ -128,7 +128,119 @@ def format_display_value(val):
             return f"{int(val):,}"
     return str(val)
 
-# 어필리에이트 테이블 생성
+# 라이브커머스 테이블 생성
+def create_live_commerce_table(data_dict, title=""):
+    """라이브커머스 계층형 테이블 생성 (소수점 1자리 ROUND)
+    
+    필요한 데이터 구조:
+    {
+        "전체": {
+            "방송횟수": int,
+            "방송매출": float (백만원),
+            "소요비용": float (백만원)
+        },
+        "거래선명": {
+            "방송횟수": int,
+            "방송매출": float,
+            "소요비용": float
+        }
+    }
+    """
+    st.markdown(f"### {title}")
+    
+    html = """
+    <style>
+        .live-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        .live-table th, .live-table td { border: 1px solid #d0d0d0; padding: 8px 6px; text-align: center; height: 26px; }
+        .header-tier1 { background: #e2efda; font-weight: 600; font-size: 13px; }
+        .total-row { background: #fff2cc; font-weight: 600; border-top: 2px solid #333; }
+        .data-row { background: #f9f9f9; }
+        .data-row:nth-child(even) { background: #ffffff; }
+        .agency-col { text-align: left; font-weight: 500; padding-left: 8px; }
+        .number { text-align: right; padding-right: 4px; font-family: 'Courier New', monospace; }
+    </style>
+    <table class="live-table">
+        <thead>
+            <tr>
+                <th class="header-tier1">거래선</th>
+                <th class="header-tier1">방송횟수</th>
+                <th class="header-tier1">방송매출(백만)</th>
+                <th class="header-tier1">소요비용(백만)</th>
+                <th class="header-tier1">방송효율</th>
+                <th class="header-tier1">회당매출(백만)</th>
+            </tr>
+        </thead>
+        <tbody>
+    """
+    
+    def add_row(agency_name, is_total=False, broadcast_count=0, broadcast_sale=0, cost=0):
+        """행 생성 (모든 숫자 소수점 1자리에서 ROUND)
+        broadcast_count: 방송횟수 (정수)
+        broadcast_sale: 방송매출 (백만원, float) → 소수점 1자리
+        cost: 소요비용 (백만원, float) → 소수점 1자리
+        """
+        row_class = "total-row" if is_total else "data-row"
+        html_row = f'<tr class="{row_class}"><td class="agency-col">{agency_name}</td>'
+        
+        # 방송횟수 (정수)
+        html_row += f'<td class="number">{format_display_value(int(broadcast_count))}</td>'
+        
+        # 방송매출 (백만원, 소수점 1자리, 천단위 쉼표)
+        if isinstance(broadcast_sale, (int, float)):
+            html_row += f'<td class="number">{round(broadcast_sale, 1):,.1f}</td>'
+        else:
+            html_row += f'<td class="number">-</td>'
+        
+        # 소요비용 (백만원, 소수점 1자리, 천단위 쉼표)
+        if isinstance(cost, (int, float)):
+            html_row += f'<td class="number">{round(cost, 1):,.1f}</td>'
+        else:
+            html_row += f'<td class="number">-</td>'
+        
+        # 방송효율 = 방송매출 / 소요비용 (소수점 1자리)
+        if isinstance(cost, (int, float)) and cost > 0 and isinstance(broadcast_sale, (int, float)):
+            efficiency = round(broadcast_sale / cost, 1)
+            html_row += f'<td class="number">{efficiency:.1f}</td>'
+        else:
+            html_row += f'<td class="number">-</td>'
+        
+        # 회당매출 = 방송매출 / 방송횟수 (백만원, 소수점 1자리)
+        if isinstance(broadcast_count, (int, float)) and broadcast_count > 0 and isinstance(broadcast_sale, (int, float)):
+            per_broadcast = round(broadcast_sale / broadcast_count, 1)
+            html_row += f'<td class="number">{per_broadcast:.1f}</td>'
+        else:
+            html_row += f'<td class="number">-</td>'
+        
+        html_row += '</tr>'
+        return html_row
+    
+    # 계 (전체) 행
+    if "전체" in data_dict:
+        total = data_dict["전체"]
+        html += add_row(
+            "계",
+            is_total=True,
+            broadcast_count=total.get('방송횟수', 0),
+            broadcast_sale=total.get('방송매출', 0),
+            cost=total.get('소요비용', 0)
+        )
+    
+    # 거래선별 행
+    for agency in AGENCIES:
+        if agency in data_dict:
+            agency_data = data_dict[agency]
+            html += add_row(
+                agency,
+                is_total=False,
+                broadcast_count=agency_data.get('방송횟수', 0),
+                broadcast_sale=agency_data.get('방송매출', 0),
+                cost=agency_data.get('소요비용', 0)
+            )
+    
+    html += "</tbody></table>"
+    st.markdown(html, unsafe_allow_html=True)
+
+
 def create_affiliate_table(data_dict, title=""):
     """어필리에이트 4단계 계층형 테이블 생성"""
     st.markdown(f"### {title}")
@@ -326,17 +438,31 @@ def dashboard():
         # Tab 3: 라이브커머스
         with tab3:
             st.write("#### 라이브커머스 현황")
-            if sales_data['live_commerce'] and '월별' in sales_data['live_commerce']:
-                months = sorted(list(sales_data['live_commerce']['월별'].keys()), reverse=True)
-                if months:
-                    latest_month = months[0]
-                    st.write(f"**{latest_month} 현황**")
+            if sales_data['live_commerce']:
+                # 8월 데이터 있는지 확인
+                if '8월' in sales_data['live_commerce'] and '월별' in sales_data['live_commerce']['8월']:
+                    months_data = sales_data['live_commerce']['8월']['월별']
+                    months_list = sorted([m for m in months_data.keys() if isinstance(months_data[m], dict)], reverse=True)
                     
-                    st.dataframe(pd.DataFrame([
-                        {"거래선": k, **v} 
-                        for k, v in sales_data['live_commerce']['월별'][latest_month].items() 
-                        if isinstance(v, dict)
-                    ]), use_container_width=True, hide_index=True)
+                    if months_list:
+                        latest_month = months_list[0]
+                        st.write(f"**{latest_month} 현황**")
+                        
+                        month_data = months_data[latest_month]
+                        display_data = {}
+                        if '전체' in month_data:
+                            display_data['전체'] = month_data['전체']
+                        for agency in AGENCIES:
+                            if agency in month_data:
+                                display_data[agency] = month_data[agency]
+                        
+                        create_live_commerce_table(display_data, "")
+                    else:
+                        st.info("라이브커머스 데이터가 없습니다")
+                else:
+                    st.info("라이브커머스 데이터가 없습니다")
+            else:
+                st.info("라이브커머스 데이터가 없습니다")
         
         # Tab 4: 어필리에이트
         with tab4:
@@ -485,15 +611,66 @@ def dashboard():
     elif current_page == "라이브":
         st.subheader("📹 라이브커머스")
         
-        if sales_data['live_commerce'] and '월별' in sales_data['live_commerce']:
-            months = sorted(list(sales_data['live_commerce']['월별'].keys()), reverse=True)
-            selected_month = st.selectbox("월", months, key="live_month")
+        live_commerce_data = sales_data.get('live_commerce', {})
+        
+        if live_commerce_data:
+            tab1, tab2 = st.tabs(["📅 월별", "📆 주차별"])
             
-            st.dataframe(pd.DataFrame([
-                {"대리점": k, **v} 
-                for k, v in sales_data['live_commerce']['월별'][selected_month].items() 
-                if isinstance(v, dict)
-            ]), use_container_width=True, hide_index=True)
+            with tab1:
+                st.write("#### 월별 실적")
+                
+                # 8월의 월별 데이터 확인
+                if '8월' in live_commerce_data and '월별' in live_commerce_data['8월']:
+                    months_data = live_commerce_data['8월']['월별']
+                    months_list = sorted([m for m in months_data.keys() if isinstance(months_data[m], dict)], reverse=True)
+                    
+                    if months_list:
+                        selected_month = st.selectbox("월 선택", months_list, key="live_month_select")
+                        
+                        if selected_month in months_data:
+                            month_data = months_data[selected_month]
+                            # 거래선과 전체 데이터를 하나의 dict로 통합
+                            display_data = {}
+                            if '전체' in month_data:
+                                display_data['전체'] = month_data['전체']
+                            for agency in AGENCIES:
+                                if agency in month_data:
+                                    display_data[agency] = month_data[agency]
+                            
+                            create_live_commerce_table(display_data, f"📊 {selected_month} 라이브커머스 실적")
+                    else:
+                        st.warning("월별 데이터가 없습니다")
+                else:
+                    st.warning("월별 데이터가 없습니다")
+            
+            with tab2:
+                st.write("#### 주차별 실적")
+                
+                # 8월의 주차별 데이터 확인
+                if '8월' in live_commerce_data and '주차별' in live_commerce_data['8월']:
+                    weeks_data = live_commerce_data['8월']['주차별']
+                    weeks_list = sorted(list(weeks_data.keys()), reverse=True)
+                    
+                    if weeks_list:
+                        selected_week = st.selectbox("주차 선택", weeks_list, key="live_week_select")
+                        
+                        if selected_week in weeks_data:
+                            week_data = weeks_data[selected_week]
+                            # 거래선과 전체 데이터를 하나의 dict로 통합
+                            display_data = {}
+                            if '전체' in week_data:
+                                display_data['전체'] = week_data['전체']
+                            for agency in AGENCIES:
+                                if agency in week_data:
+                                    display_data[agency] = week_data[agency]
+                            
+                            create_live_commerce_table(display_data, f"📊 {selected_week} 라이브커머스 실적")
+                    else:
+                        st.warning("주차별 데이터가 없습니다")
+                else:
+                    st.warning("주차별 데이터가 없습니다")
+        else:
+            st.warning("라이브커머스 데이터가 없습니다")
     
     # 어필리에이트
     elif current_page == "어필":
