@@ -105,9 +105,7 @@ def format_display_value(val):
                 return f"△{abs(val):.1f}%"
             return f"△{int(abs(val))}" if val == int(val) else f"△{abs(val):.2f}"
         else:
-            if isinstance(val, float) and val < 1:
-                return f"{val:.2f}"
-            return f"{int(val):,}" if val == int(val) else f"{val:,.2f}"
+            return f"{int(val):,}"
     return str(val)
 
 # 어필리에이트 테이블 생성
@@ -117,10 +115,10 @@ def create_affiliate_table(data_dict, title=""):
     
     html = """
     <style>
-        .affiliate-table { width: 100%; border-collapse: collapse; font-size: 11px; }
-        .affiliate-table th, .affiliate-table td { border: 1px solid #d0d0d0; padding: 5px 4px; text-align: center; height: 22px; }
-        .header-tier1 { background: #d9e1f2; font-weight: 600; }
-        .header-tier2 { background: #e7eef7; font-weight: 500; font-size: 10px; }
+        .affiliate-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+        .affiliate-table th, .affiliate-table td { border: 1px solid #d0d0d0; padding: 8px 6px; text-align: center; height: 26px; }
+        .header-tier1 { background: #d9e1f2; font-weight: 600; font-size: 14px; }
+        .header-tier2 { background: #e7eef7; font-weight: 500; font-size: 13px; }
         .total-row { background: #fff2cc; font-weight: 600; border-top: 2px solid #333; }
         .data-row { background: #f9f9f9; }
         .data-row:nth-child(even) { background: #ffffff; }
@@ -170,7 +168,7 @@ def create_affiliate_table(data_dict, title=""):
             html_row += f'<td class="number">{format_display_value(shop.get("유입수"))}</td>'
             html_row += f'<td class="number">{format_display_value(shop.get("상품주문"))}</td>'
             conversion = shop.get("전환율")
-            conv_str = "-" if (conversion == 0 or conversion is None) else f"{conversion:.1%}" if conversion < 1 else f"{conversion:.2f}%"
+            conv_str = "-" if (conversion == 0 or conversion is None) else f"{conversion:.2f}%"
             html_row += f'<td class="number">{conv_str}</td>'
             html_row += f'<td class="number">{format_display_value(shop.get("주문금액"))}</td>'
             joint = data_item.get("공동구매", {})
@@ -361,8 +359,59 @@ def dashboard():
                 months = affiliate_data.get('월별', {})
                 if months:
                     selected_month = st.selectbox("월 선택", list(months.keys()), key="month_select")
+                    
                     if selected_month in months:
-                        create_affiliate_table(months[selected_month], f"📊 {selected_month} 어필리에이트 실적")
+                        display_data = months[selected_month].copy()
+                        
+                        # 8월인 경우 주차별 합계로 표시
+                        if selected_month == "8월":
+                            weeks_data = affiliate_data.get('주차별', {})
+                            if weeks_data:
+                                # 거래선별 합계 계산
+                                sum_data = {}
+                                for agency in AGENCIES:
+                                    agency_sum = {
+                                        "어필리에이트": {"크리에이터": 0, "운영모델": 0, "주문건수": 0, "주문금액": 0},
+                                        "쇼핑커넥트": {"크리에이터": 0, "운영모델": 0, "유입수": 0, "상품주문": 0, "주문금액": 0},
+                                        "공동구매": {"크리에이터": 0, "운영모델": 0, "상품주문": 0, "주문금액": 0}
+                                    }
+                                    
+                                    for week in weeks_data.values():
+                                        if agency in week:
+                                            for channel in ["어필리에이트", "쇼핑커넥트", "공동구매"]:
+                                                for key, val in week[agency][channel].items():
+                                                    if key != "전환율" and isinstance(val, (int, float)):
+                                                        agency_sum[channel][key] += val
+                                    
+                                    # 쇼핑커넥트 전환율 계산
+                                    if agency_sum["쇼핑커넥트"]["유입수"] > 0:
+                                        agency_sum["쇼핑커넥트"]["전환율"] = (agency_sum["쇼핑커넥트"]["상품주문"] / agency_sum["쇼핑커넥트"]["유입수"]) * 100
+                                    else:
+                                        agency_sum["쇼핑커넥트"]["전환율"] = 0
+                                    
+                                    sum_data[agency] = agency_sum
+                                
+                                # 전체 합계
+                                total_sum = {
+                                    "어필리에이트": {"크리에이터": 0, "운영모델": 0, "주문건수": 0, "주문금액": 0},
+                                    "쇼핑커넥트": {"크리에이터": 0, "운영모델": 0, "유입수": 0, "상품주문": 0, "주문금액": 0},
+                                    "공동구매": {"크리에이터": 0, "운영모델": 0, "상품주문": 0, "주문금액": 0}
+                                }
+                                
+                                for agency_data in sum_data.values():
+                                    for channel in ["어필리에이트", "쇼핑커넥트", "공동구매"]:
+                                        for key, val in agency_data[channel].items():
+                                            if key != "전환율" and isinstance(val, (int, float)):\n                                                total_sum[channel][key] += val
+                                
+                                if total_sum["쇼핑커넥트"]["유입수"] > 0:
+                                    total_sum["쇼핑커넥트"]["전환율"] = (total_sum["쇼핑커넥트"]["상품주문"] / total_sum["쇼핑커넥트"]["유입수"]) * 100
+                                else:
+                                    total_sum["쇼핑커넥트"]["전환율"] = 0
+                                
+                                sum_data["계"] = total_sum
+                                display_data = sum_data
+                        
+                        create_affiliate_table(display_data, f"📊 {selected_month} 어필리에이트 실적")
                 else:
                     st.warning("월별 데이터가 없습니다")
             
@@ -397,10 +446,12 @@ def dashboard():
         st.subheader("✏️ 거래선 주차별 입력")
         
         with st.form("weekly_form"):
-            col1, col2 = st.columns(2)
+            col1, col2, col3 = st.columns(3)
             with col1:
-                agency = st.selectbox("거래선", AGENCIES, key="input_agency")
+                input_month = st.selectbox("월", ["7월", "8월"], key="input_month")
             with col2:
+                agency = st.selectbox("거래선", AGENCIES, key="input_agency")
+            with col3:
                 week = st.number_input("주차", min_value=1, max_value=52, step=1, key="input_week")
             
             st.write("---")
@@ -449,6 +500,7 @@ def dashboard():
             if st.form_submit_button("💾 저장", use_container_width=True):
                 weekly_data[agency] = weekly_data.get(agency, {})
                 weekly_data[agency][str(week)] = {
+                    "월": input_month,
                     "등록일": datetime.now().strftime("%Y-%m-%d %H:%M"),
                     "스마트스토어": {"총고객수": ss_total, "신규고객": ss_new, "재구매": ss_repeat},
                     "어필리에이트": {"판매액": af_sales, "방문수": af_visits, "특이사항": af_notes},
@@ -456,7 +508,7 @@ def dashboard():
                     "마케팅활동": {"어플리에이트": aff_activity, "네이버": nav_activity, "광고운영": ad_activity}
                 }
                 save_weekly_data(weekly_data)
-                st.success(f"✅ {agency} {week}주차 저장됨!")
+                st.success(f"✅ {input_month} {agency} {week}주차 저장됨!")
     
     # 거래선 현황
     elif current_page == "거래선현황":
@@ -467,8 +519,10 @@ def dashboard():
         if selected_agency in weekly_data:
             for week in sorted(weekly_data[selected_agency].keys(), key=lambda x: int(x), reverse=True):
                 data = weekly_data[selected_agency][week]
+                month_info = data.get('월', '')
+                month_display = f" ({month_info})" if month_info else ""
                 
-                with st.expander(f"**{week}주차** ({data.get('등록일', '-')})"):
+                with st.expander(f"**{week}주차{month_display}** ({data.get('등록일', '-')})"):
                     col1, col2, col3 = st.columns(3)
                     
                     with col1:
@@ -503,6 +557,17 @@ def dashboard():
                     if ma.get('광고운영'):
                         with st.expander("□ 광고운영"):
                             st.write(ma.get('광고운영'))
+                    
+                    st.write("---")
+                    st.subheader("⚙️ 데이터 관리")
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        if st.button("🗑️ 삭제", key=f"delete_{selected_agency}_{week}", use_container_width=True):
+                            del weekly_data[selected_agency][week]
+                            save_weekly_data(weekly_data)
+                            st.success(f"✅ {selected_agency} {week}주차 삭제됨!")
+                            st.rerun()
         else:
             st.info("등록된 데이터가 없습니다")
     
