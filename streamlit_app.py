@@ -3,12 +3,8 @@ import pandas as pd
 import json
 from datetime import datetime
 import os
-from anthropic import Anthropic
 
 st.set_page_config(page_title="거래선별 마케팅 대시보드", page_icon="📊", layout="wide")
-
-# Anthropic 클라이언트 초기화
-client = Anthropic()
 
 # 거래선 목록
 AGENCIES = ["평강", "문성", "케이디엘", "하나로", "회산", "현성", "클릭나라"]
@@ -43,52 +39,6 @@ def save_feedback(data):
     """담당자 피드백 저장"""
     with open("feedback.json", "w", encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
-
-# AI 분석 함수
-@st.cache_data(show_spinner=False)
-def analyze_marketing_activity(text, activity_type):
-    """마케팅활동 텍스트를 AI로 분석하여 요약 및 주요 내용 추출"""
-    if not text or text.strip() == "":
-        return {"요약": "-", "주요_내용": "-"}
-    
-    try:
-        prompt = f"""
-다음은 {activity_type} 마케팅활동에 대한 상세 기록입니다. 
-이를 분석하여 요약과 주요 내용을 추출해주세요.
-
-[마케팅활동 내용]
-{text}
-
-다음 형식으로 답변해주세요:
-📌 요약: (한 문장으로 핵심 내용 요약)
-📊 주요내용: (bullet point로 3-5개 항목 나열)
-
-JSON 형식으로 반환:
-{{"요약": "...", "주요_내용": "..."}}
-"""
-        
-        response = client.messages.create(
-            model="claude-opus-4-6",
-            max_tokens=500,
-            messages=[
-                {"role": "user", "content": prompt}
-            ]
-        )
-        
-        # 응답 파싱
-        response_text = response.content[0].text
-        
-        # JSON 추출
-        import re
-        json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
-        if json_match:
-            result = json.loads(json_match.group())
-            return result
-        
-        return {"요약": response_text[:100], "주요_내용": response_text}
-    
-    except Exception as e:
-        return {"요약": "분석 중 오류 발생", "주요_내용": str(e)}
 
 # 로그인 페이지
 def login():
@@ -212,50 +162,35 @@ def agency_dashboard():
             st.write("---")
             
             if st.form_submit_button("💾 저장", use_container_width=True):
-                with st.spinner("데이터 분석 중..."):
-                    if agency not in weekly_data:
-                        weekly_data[agency] = {}
-                    
-                    # AI 분석 수행
-                    aff_analysis = analyze_marketing_activity(affiliate_activity, "어플리에이트")
-                    nav_analysis = analyze_marketing_activity(naver_activity, "네이버")
-                    ad_analysis = analyze_marketing_activity(ad_activity, "광고운영")
-                    
-                    weekly_data[agency][str(week)] = {
-                        "등록일": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                        "스마트스토어": {
-                            "총고객수": smartstore_total,
-                            "신규고객": smartstore_new,
-                            "재구매": smartstore_repeat
-                        },
-                        "어필리에이트": {
-                            "판매액": affiliate_sales,
-                            "방문수": affiliate_visits,
-                            "특이사항": affiliate_notes
-                        },
-                        "라이브커머스": {
-                            "방송횟수": livecommerce_count,
-                            "판매액": livecommerce_sales,
-                            "특이사항": livecommerce_notes
-                        },
-                        "마케팅활동": {
-                            "어플리에이트": {
-                                "원문": affiliate_activity,
-                                "분석": aff_analysis
-                            },
-                            "네이버": {
-                                "원문": naver_activity,
-                                "분석": nav_analysis
-                            },
-                            "광고운영": {
-                                "원문": ad_activity,
-                                "분석": ad_analysis
-                            }
-                        }
+                if agency not in weekly_data:
+                    weekly_data[agency] = {}
+                
+                weekly_data[agency][str(week)] = {
+                    "등록일": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                    "스마트스토어": {
+                        "총고객수": smartstore_total,
+                        "신규고객": smartstore_new,
+                        "재구매": smartstore_repeat
+                    },
+                    "어필리에이트": {
+                        "판매액": affiliate_sales,
+                        "방문수": affiliate_visits,
+                        "특이사항": affiliate_notes
+                    },
+                    "라이브커머스": {
+                        "방송횟수": livecommerce_count,
+                        "판매액": livecommerce_sales,
+                        "특이사항": livecommerce_notes
+                    },
+                    "마케팅활동": {
+                        "어플리에이트": affiliate_activity,
+                        "네이버": naver_activity,
+                        "광고운영": ad_activity
                     }
-                    
-                    save_weekly_data(weekly_data)
-                    st.success(f"✅ {week}주차 데이터가 저장되었습니다!")
+                }
+                
+                save_weekly_data(weekly_data)
+                st.success(f"✅ {week}주차 데이터가 저장되었습니다!")
     
     # TAB 2: 입력 현황
     with tab2:
@@ -302,15 +237,15 @@ def agency_dashboard():
                     
                     if ma.get('어플리에이트'):
                         with st.expander("□ 어플리에이트"):
-                            st.write(ma.get('어플리에이트').get('원문', '-'))
+                            st.write(ma.get('어플리에이트', '-'))
                     
                     if ma.get('네이버'):
                         with st.expander("□ 네이버"):
-                            st.write(ma.get('네이버').get('원문', '-'))
+                            st.write(ma.get('네이버', '-'))
                     
                     if ma.get('광고운영'):
                         with st.expander("□ 광고운영"):
-                            st.write(ma.get('광고운영').get('원문', '-'))
+                            st.write(ma.get('광고운영', '-'))
         else:
             st.info("등록된 데이터가 없습니다")
     
@@ -398,7 +333,7 @@ def manager_dashboard():
                 if lc.get('특이사항'):
                     st.info(f"💬 {lc.get('특이사항')}")
             
-            # 마케팅활동 - AI 요약본 표시
+            # 마케팅활동
             st.write("---")
             st.subheader("📢 마케팅활동")
             
@@ -408,27 +343,21 @@ def manager_dashboard():
             
             with col1:
                 if ma.get('어플리에이트'):
-                    analysis = ma['어플리에이트'].get('분석', {})
                     st.write("**□ 어플리에이트**")
-                    st.info(f"📌 {analysis.get('요약', '-')}")
-                    with st.expander("📄 상세 내용"):
-                        st.write(ma['어플리에이트'].get('원문', '-'))
+                    with st.expander("📄 내용 보기"):
+                        st.write(ma.get('어플리에이트', '-'))
             
             with col2:
                 if ma.get('네이버'):
-                    analysis = ma['네이버'].get('분석', {})
                     st.write("**□ 네이버**")
-                    st.info(f"📌 {analysis.get('요약', '-')}")
-                    with st.expander("📄 상세 내용"):
-                        st.write(ma['네이버'].get('원문', '-'))
+                    with st.expander("📄 내용 보기"):
+                        st.write(ma.get('네이버', '-'))
             
             with col3:
                 if ma.get('광고운영'):
-                    analysis = ma['광고운영'].get('분석', {})
                     st.write("**□ 광고운영**")
-                    st.info(f"📌 {analysis.get('요약', '-')}")
-                    with st.expander("📄 상세 내용"):
-                        st.write(ma['광고운영'].get('원문', '-'))
+                    with st.expander("📄 내용 보기"):
+                        st.write(ma.get('광고운영', '-'))
             
             # 피드백 작성 폼
             st.write("---")
@@ -441,3 +370,54 @@ def manager_dashboard():
                     horizontal=True,
                     key=f"type_{selected_agency}_{week}"
                 )
+            
+            comment = st.text_area(
+                "담당자 의견",
+                placeholder="이번 주 성과에 대한 의견을 작성하세요",
+                height=100,
+                key=f"comment_{selected_agency}_{week}"
+            )
+            
+            if st.button("💾 피드백 저장", key=f"save_{selected_agency}_{week}", use_container_width=True):
+                if selected_agency not in feedback_data:
+                    feedback_data[selected_agency] = {}
+                
+                feedback_data[selected_agency][week] = {
+                    "type": "praise" if "칭찬" in feedback_type else "request",
+                    "comment": comment,
+                    "date": datetime.now().strftime("%Y-%m-%d %H:%M")
+                }
+                
+                save_feedback(feedback_data)
+                st.success("✅ 피드백이 저장되었습니다!")
+            
+            st.divider()
+    else:
+        st.info(f"{selected_agency}에 입력된 데이터가 없습니다")
+    
+    # 피드백 이력
+    st.subheader(f"📝 {selected_agency} 피드백 이력")
+    
+    if selected_agency in feedback_data and feedback_data[selected_agency]:
+        for week in sorted(feedback_data[selected_agency].keys(), key=lambda x: int(x), reverse=True):
+            fb = feedback_data[selected_agency][week]
+            
+            with st.container(border=True):
+                if fb.get('type') == 'praise':
+                    st.success(f"**{week}주차** ✅ 칭찬")
+                    st.write(f"{fb.get('comment', '-')}")
+                else:
+                    st.warning(f"**{week}주차** ⚠️ 확인요청")
+                    st.write(f"{fb.get('comment', '-')}")
+                
+                st.caption(f"작성일: {fb.get('date', '-')}")
+    else:
+        st.info("피드백 이력이 없습니다")
+
+# 메인 로직
+if st.session_state.user_role is None:
+    login()
+elif st.session_state.user_role == "agency":
+    agency_dashboard()
+elif st.session_state.user_role == "manager":
+    manager_dashboard()
