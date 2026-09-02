@@ -112,7 +112,7 @@ with t[0]:
                 "실행대비": f"{grand_total['ACTION'][month]:,.0f}",
                 "전년대비": f"{grand_total['SALES'][month]:,.0f}"
             })
-        st.dataframe(pd.DataFrame(rows), use_container_width=True)
+        st.dataframe(pd.DataFrame(rows), width='stretch')
 
 # TAB 2 - FCST 현황
 with t[1]:
@@ -148,7 +148,7 @@ with t[1]:
                         "실행대비": f"{product_data['ACTION'][month]:,.0f}",
                         "전년대비": f"{product_data['SALES'][month]:,.0f}"
                     })
-                st.dataframe(pd.DataFrame(rows), use_container_width=True)
+                st.dataframe(pd.DataFrame(rows), width='stretch')
                 st.divider()
                 
                 # 채널별
@@ -165,17 +165,17 @@ with t[1]:
                     if product_name in ["냉장고", "의류케어", "조리기기"]:
                         with st.expander(f"🔽 {channel_name}"):
                             st.write(f"**{channel_name} 전체**")
-                            st.dataframe(pd.DataFrame(render_channel_total(channel_total)), use_container_width=True)
+                            st.dataframe(pd.DataFrame(render_channel_total(channel_total)), width='stretch')
                             st.divider()
                             
                             # 모델들
                             for model_name, model_data in sorted(models.items()):
                                 st.write(f"  **{model_name}**")
-                                st.dataframe(pd.DataFrame(get_full_table_rows(model_data)), use_container_width=True)
+                                st.dataframe(pd.DataFrame(get_full_table_rows(model_data)), width='stretch')
                     else:
                         # 김치냉장고, 정수기: expander 없음
                         st.write(f"**{channel_name}**")
-                        st.dataframe(pd.DataFrame(render_channel_total(channel_total)), use_container_width=True)
+                        st.dataframe(pd.DataFrame(render_channel_total(channel_total)), width='stretch')
 
 # TAB 3
 with t[2]:
