@@ -39,29 +39,33 @@ st.markdown(f"**업데이트**: {datetime.now().strftime('%Y.%m.%d %H:%M')}")
 
 t = st.tabs(["전체", "FCST", "프리미엄", "스마트스토어", "라이브", "어필", "PPM", "SOP활동", "SOP입력", "STAR"])
 
+# 제품 순서 정의
+PRODUCT_ORDER = ["냉장고", "김치냉장고", "의류케어", "조리기기", "정수기"]
+
 def create_summary_table(all_products_data):
     """제품별 합계 테이블 생성 - 26년 전체"""
     rows = []
     
     # 전체 합계 행 추가
-    grand_total_sales = sum(p["SALES"].get("합계", 0) for p in all_products_data.values() if "SALES" in p)
-    grand_total_annual = sum(p["ANNUAL"].get("합계", 0) for p in all_products_data.values() if "ANNUAL" in p)
-    grand_total_action = sum(p["ACTION"].get("합계", 0) for p in all_products_data.values() if "ACTION" in p)
-    grand_total_2025 = sum(p["2025"].get("합계", 0) for p in all_products_data.values() if "2025" in p)
+    grand_total_sales = sum(p.get("SALES", {}).get("합계", sum(p.get("SALES", {}).values())) for p in all_products_data.values() if "SALES" in p)
+    grand_total_annual = sum(p.get("ANNUAL", {}).get("합계", sum(p.get("ANNUAL", {}).values())) for p in all_products_data.values() if "ANNUAL" in p)
+    grand_total_action = sum(p.get("ACTION", {}).get("합계", sum(p.get("ACTION", {}).values())) for p in all_products_data.values() if "ACTION" in p)
+    grand_total_2025 = sum(p.get("2025", {}).get("합계", sum(p.get("2025", {}).values())) for p in all_products_data.values() if "2025" in p)
     
     rows.append({
         "제품": "그룹 계",
-        "실적(원)": f"{grand_total_sales:,.0f}",
-        "경영대비(%)": f"{(grand_total_sales/grand_total_annual):.2f}%" if grand_total_annual > 0 else "-",
-        "실행대비(%)": f"{(grand_total_sales/grand_total_action):.2f}%" if grand_total_action > 0 else "-",
-        "전년대비(%)": f"{((grand_total_sales/grand_total_2025 - 1) * 100):.2f}%" if grand_total_2025 > 0 else "-"
+        "실적(수량)": f"{grand_total_sales:,.0f}",
+        "경영비(%)": f"{(grand_total_sales/grand_total_annual):.2f}%" if grand_total_annual > 0 else "-",
+        "실행비(%)": f"{(grand_total_sales/grand_total_action):.2f}%" if grand_total_action > 0 else "-",
+        "전년비(%)": f"{((grand_total_sales/grand_total_2025 - 1) * 100):.2f}%" if grand_total_2025 > 0 else "-"
     })
     
-    # 제품별 행 추가
-    for product_name in sorted(all_products_data.keys()):
+    # 제품별 행 추가 (정렬 순서)
+    for product_name in PRODUCT_ORDER:
+        if product_name not in all_products_data:
+            continue
         product_data = all_products_data[product_name]
         
-        # 각 제품의 전체 월 합계
         sales_total = sum(product_data.get("SALES", {}).values())
         annual_total = sum(product_data.get("ANNUAL", {}).values())
         action_total = sum(product_data.get("ACTION", {}).values())
@@ -69,13 +73,31 @@ def create_summary_table(all_products_data):
         
         rows.append({
             "제품": product_name,
-            "실적(원)": f"{sales_total:,.0f}",
-            "경영대비(%)": f"{(sales_total/annual_total):.2f}%" if annual_total > 0 else "-",
-            "실행대비(%)": f"{(sales_total/action_total):.2f}%" if action_total > 0 else "-",
-            "전년대비(%)": f"{((sales_total/prev_year_total - 1) * 100):.2f}%" if prev_year_total > 0 else "-"
+            "실적(수량)": f"{sales_total:,.0f}",
+            "경영비(%)": f"{(sales_total/annual_total):.2f}%" if annual_total > 0 else "-",
+            "실행비(%)": f"{(sales_total/action_total):.2f}%" if action_total > 0 else "-",
+            "전년비(%)": f"{((sales_total/prev_year_total - 1) * 100):.2f}%" if prev_year_total > 0 else "-"
         })
     
     return pd.DataFrame(rows)
+
+def create_month_table(model_data):
+    """월을 가로로 배열한 테이블 생성"""
+    months = sorted(model_data.get('SALES', {}).keys(), key=lambda x: int(x.replace("월", "")) if "월" in x else 0)
+    
+    data_dict = {}
+    for month in months:
+        actual = model_data.get('SALES', {}).get(month, 0)
+        annual = model_data.get('ANNUAL', {}).get(month, 1)
+        action = model_data.get('ACTION', {}).get(month, 1)
+        prev_year = model_data.get('2025', {}).get(month, 1)
+        
+        data_dict[f"{month}\n실적(수량)"] = f"{actual:,.0f}"
+        data_dict[f"{month}\n경영비(%)"] = f"{(actual/annual):.2f}%" if annual > 0 else "-"
+        data_dict[f"{month}\n실행비(%)"] = f"{(actual/action):.2f}%" if action > 0 else "-"
+        data_dict[f"{month}\n전년비(%)"] = f"{((actual/prev_year - 1) * 100):.2f}%" if prev_year > 0 else "-"
+    
+    return pd.DataFrame([data_dict]).T
 
 # TAB 1
 with t[0]:
@@ -115,14 +137,17 @@ with t[1]:
                                 if isinstance(value, (int, float)):
                                     all_products[product_name][key][month] += value
         
-        # 디폴트: 전체 합계 (제품별)
+        # 디폴트: 전체 합계
         st.subheader("📊 26년 계")
         st.dataframe(create_summary_table(all_products), width='stretch', hide_index=True)
         st.divider()
         
         # 제품별로 expander 처리
         st.subheader("📦 제품별 상세")
-        for product_name in sorted(all_products.keys()):
+        for product_name in PRODUCT_ORDER:
+            if product_name not in all_products:
+                continue
+            
             with st.expander(f"📦 {product_name}", expanded=False):
                 product_data = all_products[product_name]
                 
@@ -132,9 +157,10 @@ with t[1]:
                 st.dataframe(create_summary_table(product_summary), width='stretch', hide_index=True)
                 st.divider()
                 
-                # 채널별
-                for channel_name in sorted(data['bizplan'].keys()):
-                    channel_data = data['bizplan'][channel_name]
+                # Seg.별 (채널별)
+                st.write("**Seg.별**")
+                for channel_name in ["SOP", "쿠팡", "종합몰", "홈쇼핑"]:
+                    channel_data = data['bizplan'].get(channel_name, {})
                     if product_name not in channel_data:
                         continue
                     
@@ -150,24 +176,9 @@ with t[1]:
                                     if isinstance(value, (int, float)):
                                         channel_total[key][month] += value
                     
-                    # 냉장고, 의류케어, 조리기기: 모든 채널이 expander
-                    if product_name in ["냉장고", "의류케어", "조리기기"]:
-                        with st.expander(f"🔽 {channel_name}"):
-                            st.write(f"**{channel_name} 전체**")
-                            channel_summary = {channel_name: channel_total}
-                            st.dataframe(create_summary_table(channel_summary), width='stretch', hide_index=True)
-                            st.divider()
-                            
-                            # 모델들
-                            for model_name, model_data in sorted(models.items()):
-                                st.write(f"  **{model_name}**")
-                                model_summary = {model_name: model_data}
-                                st.dataframe(create_summary_table(model_summary), width='stretch', hide_index=True)
-                    else:
-                        # 김치냉장고, 정수기: expander 없음
-                        st.write(f"**{channel_name}**")
-                        channel_summary = {channel_name: channel_total}
-                        st.dataframe(create_summary_table(channel_summary), width='stretch', hide_index=True)
+                    # 채널별 월표
+                    st.write(f"**{channel_name}**")
+                    st.dataframe(create_month_table(channel_total), width='stretch')
 
 # TAB 3
 with t[2]:
