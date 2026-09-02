@@ -136,8 +136,8 @@ def create_live_commerce_table(data_dict, title=""):
     {
         "전체": {
             "방송횟수": int,
-            "방송매출": float (백만원),
-            "소요비용": float (백만원)
+            "방송매출": float (원 단위 또는 백만원),
+            "소요비용": float (원 단위 또는 백만원)
         },
         "거래선명": {
             "방송횟수": int,
@@ -158,6 +158,7 @@ def create_live_commerce_table(data_dict, title=""):
         .data-row:nth-child(even) { background: #ffffff; }
         .agency-col { text-align: left; font-weight: 500; padding-left: 8px; }
         .number { text-align: right; padding-right: 4px; font-family: 'Courier New', monospace; }
+        .negative { color: #d92d20; }
     </style>
     <table class="live-table">
         <thead>
@@ -176,8 +177,8 @@ def create_live_commerce_table(data_dict, title=""):
     def add_row(agency_name, is_total=False, broadcast_count=0, broadcast_sale=0, cost=0):
         """행 생성 (모든 숫자 소수점 1자리에서 ROUND)
         broadcast_count: 방송횟수 (정수)
-        broadcast_sale: 방송매출 (백만원, float) → 소수점 1자리
-        cost: 소요비용 (백만원, float) → 소수점 1자리
+        broadcast_sale: 방송매출 (원 단위 또는 백만원, float) → 소수점 1자리
+        cost: 소요비용 (원 단위 또는 백만원, float) → 소수점 1자리
         """
         row_class = "total-row" if is_total else "data-row"
         html_row = f'<tr class="{row_class}"><td class="agency-col">{agency_name}</td>'
@@ -185,15 +186,24 @@ def create_live_commerce_table(data_dict, title=""):
         # 방송횟수 (정수)
         html_row += f'<td class="number">{format_display_value(int(broadcast_count))}</td>'
         
-        # 방송매출 (백만원, 소수점 1자리, 천단위 쉼표)
+        # 방송매출 (원 단위를 백만 단위로 변환, 소수점 1자리, 천단위 쉼표)
         if isinstance(broadcast_sale, (int, float)):
-            html_row += f'<td class="number">{round(broadcast_sale, 1):,.1f}</td>'
+            # 원 단위인지 백만 단위인지 판단 (1000000 이상이면 원 단위)
+            if broadcast_sale >= 1000000:
+                sale_million = broadcast_sale / 1000000
+            else:
+                sale_million = broadcast_sale
+            html_row += f'<td class="number">{round(sale_million, 1):,.1f}</td>'
         else:
             html_row += f'<td class="number">-</td>'
         
-        # 소요비용 (백만원, 소수점 1자리, 천단위 쉼표)
+        # 소요비용 (원 단위를 백만 단위로 변환, 소수점 1자리, 천단위 쉼표)
         if isinstance(cost, (int, float)):
-            html_row += f'<td class="number">{round(cost, 1):,.1f}</td>'
+            if cost >= 1000000:
+                cost_million = cost / 1000000
+            else:
+                cost_million = cost
+            html_row += f'<td class="number">{round(cost_million, 1):,.1f}</td>'
         else:
             html_row += f'<td class="number">-</td>'
         
@@ -204,10 +214,14 @@ def create_live_commerce_table(data_dict, title=""):
         else:
             html_row += f'<td class="number">-</td>'
         
-        # 회당매출 = 방송매출 / 방송횟수 (백만원, 소수점 1자리)
+        # 회당매출 = 방송매출 / 방송횟수 (백만원, 소수점 1자리, 천단위 쉼표)
         if isinstance(broadcast_count, (int, float)) and broadcast_count > 0 and isinstance(broadcast_sale, (int, float)):
-            per_broadcast = round(broadcast_sale / broadcast_count, 1)
-            html_row += f'<td class="number">{per_broadcast:.1f}</td>'
+            if broadcast_sale >= 1000000:
+                per_broadcast = broadcast_sale / broadcast_count / 1000000
+            else:
+                per_broadcast = broadcast_sale / broadcast_count
+            per_broadcast_rounded = round(per_broadcast, 1)
+            html_row += f'<td class="number">{per_broadcast_rounded:,.1f}</td>'
         else:
             html_row += f'<td class="number">-</td>'
         
@@ -241,6 +255,8 @@ def create_live_commerce_table(data_dict, title=""):
     st.markdown(html, unsafe_allow_html=True)
 
 
+
+
 def create_affiliate_table(data_dict, title=""):
     """어필리에이트 4단계 계층형 테이블 생성"""
     st.markdown(f"### {title}")
@@ -266,20 +282,20 @@ def create_affiliate_table(data_dict, title=""):
                 <th colspan="4" class="header-tier1">공동구매</th>
             </tr>
             <tr>
-                <th class="header-tier2">크리<br/>운영수</th>
-                <th class="header-tier2">운영<br/>모델</th>
-                <th class="header-tier2">주문<br/>건수</th>
-                <th class="header-tier2">주문금액<br/>(백만)</th>
-                <th class="header-tier2">크리</th>
-                <th class="header-tier2">운영</th>
+                <th class="header-tier2">크리에이터 운영수</th>
+                <th class="header-tier2">운영모델</th>
+                <th class="header-tier2">주문건수</th>
+                <th class="header-tier2">주문금액(백만)</th>
+                <th class="header-tier2">크리에이터 운영수</th>
+                <th class="header-tier2">운영모델</th>
                 <th class="header-tier2">유입수</th>
                 <th class="header-tier2">상품주문</th>
-                <th class="header-tier2">전환율<br/>(%)</th>
-                <th class="header-tier2">주문금액<br/>(백만)</th>
-                <th class="header-tier2">크리</th>
-                <th class="header-tier2">운영</th>
+                <th class="header-tier2">전환율(%)</th>
+                <th class="header-tier2">주문금액(백만)</th>
+                <th class="header-tier2">크리에이터 운영수</th>
+                <th class="header-tier2">운영모델</th>
                 <th class="header-tier2">상품주문</th>
-                <th class="header-tier2">주문금액<br/>(백만)</th>
+                <th class="header-tier2">주문금액(백만)</th>
             </tr>
         </thead>
         <tbody>
@@ -610,6 +626,7 @@ def dashboard():
     # 라이브커머스
     elif current_page == "라이브":
         st.subheader("📹 라이브커머스")
+        st.caption("💡 8월부터 주차별 데이터만 제공 (현재 W36A 취합 전)")
         
         live_commerce_data = sales_data.get('live_commerce', {})
         
@@ -617,36 +634,41 @@ def dashboard():
             tab1, tab2 = st.tabs(["📅 월별", "📆 주차별"])
             
             with tab1:
-                st.write("#### 월별 실적")
+                st.write("#### 월별 실적 (1월~7월)")
                 
-                # 8월의 월별 데이터 확인
-                if '8월' in live_commerce_data and '월별' in live_commerce_data['8월']:
-                    months_data = live_commerce_data['8월']['월별']
-                    months_list = sorted([m for m in months_data.keys() if isinstance(months_data[m], dict)], reverse=True)
+                # 1~7월 데이터 표시
+                months_list = ['1월', '2월', '3월', '4월', '5월', '6월', '7월']
+                available_months = []
+                
+                for month in months_list:
+                    if month in live_commerce_data and '월별' in live_commerce_data[month]:
+                        months_in_data = live_commerce_data[month].get('월별', {})
+                        if months_in_data:
+                            available_months.append(month)
+                
+                if available_months:
+                    available_months = sorted(available_months, reverse=True)
+                    selected_month = st.selectbox("월 선택", available_months, key="live_month_select")
                     
-                    if months_list:
-                        selected_month = st.selectbox("월 선택", months_list, key="live_month_select")
+                    if selected_month in live_commerce_data:
+                        month_data = live_commerce_data[selected_month]['월별']
                         
-                        if selected_month in months_data:
-                            month_data = months_data[selected_month]
-                            # 거래선과 전체 데이터를 하나의 dict로 통합
-                            display_data = {}
-                            if '전체' in month_data:
-                                display_data['전체'] = month_data['전체']
-                            for agency in AGENCIES:
-                                if agency in month_data:
-                                    display_data[agency] = month_data[agency]
-                            
-                            create_live_commerce_table(display_data, f"📊 {selected_month} 라이브커머스 실적")
-                    else:
-                        st.warning("월별 데이터가 없습니다")
+                        # 데이터 구성
+                        display_data = {}
+                        if '전체' in month_data:
+                            display_data['전체'] = month_data['전체']
+                        for agency in AGENCIES:
+                            if agency in month_data:
+                                display_data[agency] = month_data[agency]
+                        
+                        create_live_commerce_table(display_data, f"📊 {selected_month} 라이브커머스 실적")
                 else:
-                    st.warning("월별 데이터가 없습니다")
+                    st.warning("1월~7월 월별 데이터가 없습니다")
             
             with tab2:
-                st.write("#### 주차별 실적")
+                st.write("#### 주차별 실적 (8월 데이터)")
                 
-                # 8월의 주차별 데이터 확인
+                # 8월 주차별 데이터만 표시
                 if '8월' in live_commerce_data and '주차별' in live_commerce_data['8월']:
                     weeks_data = live_commerce_data['8월']['주차별']
                     weeks_list = sorted(list(weeks_data.keys()), reverse=True)
@@ -656,7 +678,8 @@ def dashboard():
                         
                         if selected_week in weeks_data:
                             week_data = weeks_data[selected_week]
-                            # 거래선과 전체 데이터를 하나의 dict로 통합
+                            
+                            # 데이터 구성
                             display_data = {}
                             if '전체' in week_data:
                                 display_data['전체'] = week_data['전체']
@@ -668,7 +691,7 @@ def dashboard():
                     else:
                         st.warning("주차별 데이터가 없습니다")
                 else:
-                    st.warning("주차별 데이터가 없습니다")
+                    st.warning("8월 주차별 데이터가 없습니다")
         else:
             st.warning("라이브커머스 데이터가 없습니다")
     
