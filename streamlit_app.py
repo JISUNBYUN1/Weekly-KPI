@@ -40,23 +40,33 @@ if "page" not in st.session_state:
 @st.cache_data(ttl=3600)
 def load_sales_data():
     """KPI 데이터 로드"""
+    import os
     data = {}
     
+    # 현재 디렉토리 확인
+    current_dir = os.getcwd()
+    
     bizplan = {}
-    for f in ['bizplan_SOP.json', 'bizplan_쿠팡.json', 'bizplan_종합몰.json', 'bizplan_홈쇼핑.json']:
+    bizplan_files = ['bizplan_SOP.json', 'bizplan_쿠팡.json', 'bizplan_종합몰.json', 'bizplan_홈쇼핑.json']
+    for f in bizplan_files:
         try:
             with open(f, encoding='utf-8') as file:
                 bizplan.update(json.load(file))
-        except:
+        except FileNotFoundError:
+            pass
+        except Exception as e:
             pass
     data['bizplan'] = bizplan
     
     premium = {}
-    for f in ['premium_냉장고.json', 'premium_세탁기.json', 'premium_식기세척기.json', 'premium_정수기.json']:
+    premium_files = ['premium_냉장고.json', 'premium_세탁기.json', 'premium_식기세척기.json', 'premium_정수기.json']
+    for f in premium_files:
         try:
             with open(f, encoding='utf-8') as file:
                 premium.update(json.load(file))
-        except:
+        except FileNotFoundError:
+            pass
+        except Exception as e:
             pass
     data['premium'] = premium
     
@@ -70,8 +80,14 @@ def load_sales_data():
     for key, filename in base_files.items():
         try:
             with open(filename, encoding='utf-8') as f:
-                data[key] = json.load(f)
-        except:
+                loaded_data = json.load(f)
+                data[key] = loaded_data
+        except FileNotFoundError:
+            # 파일을 찾을 수 없으면 빈 데이터로 설정
+            data[key] = {}
+        except json.JSONDecodeError:
+            data[key] = {}
+        except Exception as e:
             data[key] = {}
     
     return data
@@ -175,10 +191,10 @@ def create_live_commerce_table(data_dict, title=""):
     """
     
     def add_row(agency_name, is_total=False, broadcast_count=0, broadcast_sale=0, cost=0):
-        """행 생성 (모든 숫자 소수점 1자리에서 ROUND)
+        """행 생성 (6개 칼럼: 거래선, 방송횟수, 방송매출, 소요비용, 방송효율, 회당매출)
         broadcast_count: 방송횟수 (정수)
         broadcast_sale: 방송매출 (원 단위 또는 백만원, float) → 소수점 1자리
-        cost: 소요비용 (원 단위 또는 백만원, float) → 소수점 1자리
+        cost: 소요비용 (원 단위 또는 백만원, float) → 소수점 2자리
         """
         row_class = "total-row" if is_total else "data-row"
         html_row = f'<tr class="{row_class}"><td class="agency-col">{agency_name}</td>'
@@ -197,13 +213,13 @@ def create_live_commerce_table(data_dict, title=""):
         else:
             html_row += f'<td class="number">-</td>'
         
-        # 소요비용 (원 단위를 백만 단위로 변환, 소수점 1자리, 천단위 쉼표)
-        if isinstance(cost, (int, float)):
+        # 소요비용 (원 단위를 백만 단위로 변환, 소수점 2자리, 천단위 쉼표)
+        if isinstance(cost, (int, float)) and cost > 0:
             if cost >= 1000000:
                 cost_million = cost / 1000000
             else:
                 cost_million = cost
-            html_row += f'<td class="number">{round(cost_million, 1):,.1f}</td>'
+            html_row += f'<td class="number">{round(cost_million, 2):,.2f}</td>'
         else:
             html_row += f'<td class="number">-</td>'
         
@@ -563,66 +579,6 @@ def dashboard():
             st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
     
     # 프리미엄
-    elif current_page == "프리미엄":
-        st.subheader("💎 프리미엄 비중")
-        
-        if sales_data['premium']:
-            # 제품별로 데이터 표시
-            premium_data = sales_data['premium']
-            
-            # 제품 목록 추출
-            products = list(premium_data.keys())
-            
-            if products:
-                st.write(f"**총 {len(products)}개 제품 데이터**")
-                
-                for product in products:
-                    product_info = premium_data[product]
-                    
-                    with st.expander(f"📊 {product}"):
-                        # 데이터가 dict 형식인 경우
-                        if isinstance(product_info, dict):
-                            # 월별 데이터가 있는 경우
-                            if '월별' in product_info:
-                                months = sorted(list(product_info['월별'].keys()), reverse=True)
-                                selected_month = st.selectbox("월", months, key=f"premium_{product}_month")
-                                
-                                month_data = product_info['월별'][selected_month]
-                                st.dataframe(pd.DataFrame([
-                                    {"거래선": k, **v} 
-                                    for k, v in month_data.items() 
-                                    if isinstance(v, dict)
-                                ]), use_container_width=True, hide_index=True)
-                            else:
-                                # 직접적인 데이터 표시
-                                st.write(product_info)
-                        # 리스트 형식인 경우
-                        elif isinstance(product_info, list):
-                            if product_info and isinstance(product_info[0], dict):
-                                st.dataframe(pd.DataFrame(product_info), use_container_width=True, hide_index=True)
-                            else:
-                                st.write(product_info)
-                        else:
-                            st.write(product_info)
-            else:
-                st.info("프리미엄 제품 데이터가 없습니다")
-        else:
-            st.info("프리미엄 데이터를 불러올 수 없습니다")
-    
-    # 스마트스토어
-    elif current_page == "스마트스토어":
-        st.subheader("🛒 스마트스토어")
-        
-        if sales_data['smartstore'] and '월별' in sales_data['smartstore']:
-            months = sorted(list(sales_data['smartstore']['월별'].keys()), reverse=True)
-            selected_month = st.selectbox("월", months, key="ss_month")
-            
-            st.dataframe(pd.DataFrame([
-                {"대리점": k, **v} 
-                for k, v in sales_data['smartstore']['월별'][selected_month].items() 
-                if isinstance(v, dict)
-            ]), use_container_width=True, hide_index=True)
-    
     # 라이브커머스
     elif current_page == "라이브":
         st.subheader("📹 라이브커머스")
@@ -649,13 +605,33 @@ def dashboard():
                         if selected_month in months_data:
                             month_data = months_data[selected_month]
                             
-                            # 데이터 구성
+                            # 소요비용 데이터 로드 (거래선별 월평균)
+                            live_cost_data = {}
+                            try:
+                                with open('live_commerce_cost_data.json', 'r', encoding='utf-8') as f:
+                                    live_cost_data = json.load(f)
+                                    # 연간 누적을 월평균으로 변환
+                                    for agency in live_cost_data:
+                                        live_cost_data[agency]['소요비용'] = live_cost_data[agency].get('소요비용', 0) / 12
+                            except:
+                                live_cost_data = {}
+                            
+                            # 데이터 구성 (소요비용 병합)
                             display_data = {}
                             if '전체' in month_data:
-                                display_data['전체'] = month_data['전체']
+                                display_data['전체'] = month_data['전체'].copy()
+                                # 전체 소요비용 계산
+                                total_cost = sum([data.get('소요비용', 0) for data in live_cost_data.values()])
+                                display_data['전체']['소요비용'] = total_cost
+                            
                             for agency in AGENCIES:
                                 if agency in month_data:
-                                    display_data[agency] = month_data[agency]
+                                    display_data[agency] = month_data[agency].copy()
+                                    # 해당 거래선의 소요비용 추가
+                                    if agency in live_cost_data:
+                                        display_data[agency]['소요비용'] = live_cost_data[agency]['소요비용']
+                                    else:
+                                        display_data[agency]['소요비용'] = 0
                             
                             create_live_commerce_table(display_data, f"📊 {selected_month} 라이브커머스 실적")
                     else:
@@ -669,21 +645,76 @@ def dashboard():
                 # 8월 주차별 데이터만 표시
                 if '8월' in live_commerce_data and '주차별' in live_commerce_data['8월']:
                     weeks_data = live_commerce_data['8월']['주차별']
-                    weeks_list = sorted(list(weeks_data.keys()), reverse=True)
+                    weeks_list = list(weeks_data.keys())
+                    
+                    # 주차명 매핑 ("31B주" → "W31B")
+                    week_mapping = {
+                        "31B주": "W31B",
+                        "32주": "W32",
+                        "33주": "W33",
+                        "34주": "W34",
+                        "35주": "W35",
+                        "36A주": "W36A"
+                    }
+                    
+                    # 보기 이름 생성 (주차명 + 날짜)
+                    try:
+                        with open('weeks_2026.json', 'r', encoding='utf-8') as f:
+                            weeks_2026 = json.load(f)
+                    except:
+                        weeks_2026 = {}
+                    
+                    week_display_names = []
+                    for week_key in weeks_list:
+                        mapped_week = week_mapping.get(week_key, week_key)
+                        if mapped_week in weeks_2026:
+                            date_range = f"{weeks_2026[mapped_week]['start']} ~ {weeks_2026[mapped_week]['end']}"
+                            display_name = f"{mapped_week} ({date_range})"
+                        else:
+                            display_name = mapped_week
+                        week_display_names.append((week_key, display_name))
                     
                     if weeks_list:
-                        selected_week = st.selectbox("주차 선택", weeks_list, key="live_week_select")
+                        selected_display = st.selectbox(
+                            "주차 선택",
+                            [name for _, name in week_display_names],
+                            key="live_week_select"
+                        )
                         
-                        if selected_week in weeks_data:
+                        # 선택한 주차의 원본 키 찾기
+                        selected_week = None
+                        for orig_key, display_name in week_display_names:
+                            if display_name == selected_display:
+                                selected_week = orig_key
+                                break
+                        
+                        if selected_week and selected_week in weeks_data:
                             week_data = weeks_data[selected_week]
                             
-                            # 데이터 구성
+                            # 소요비용 데이터 로드 (거래선별 연간 누적)
+                            live_cost_data = {}
+                            try:
+                                with open('live_commerce_cost_data.json', 'r', encoding='utf-8') as f:
+                                    live_cost_data = json.load(f)
+                            except:
+                                live_cost_data = {}
+                            
+                            # 데이터 구성 (소요비용 병합)
                             display_data = {}
                             if '전체' in week_data:
-                                display_data['전체'] = week_data['전체']
+                                display_data['전체'] = week_data['전체'].copy()
+                                # 전체 소요비용 계산
+                                total_cost = sum([data.get('소요비용', 0) for data in live_cost_data.values()])
+                                display_data['전체']['소요비용'] = total_cost
+                            
                             for agency in AGENCIES:
                                 if agency in week_data:
-                                    display_data[agency] = week_data[agency]
+                                    display_data[agency] = week_data[agency].copy()
+                                    # 해당 거래선의 소요비용 추가
+                                    if agency in live_cost_data:
+                                        display_data[agency]['소요비용'] = live_cost_data[agency]['소요비용']
+                                    else:
+                                        display_data[agency]['소요비용'] = 0
                             
                             create_live_commerce_table(display_data, f"📊 {selected_week} 라이브커머스 실적")
                     else:
@@ -814,8 +845,9 @@ def dashboard():
                 input_agency = st.selectbox("거래선 선택", AGENCIES, key="input_agency")
             
             with col2:
-                # 월 역순
-                input_month = st.selectbox("월 선택", ["8월", "7월"], key="input_month")
+                # 월 선택 (1-12월 동적)
+                all_months = ["1월", "2월", "3월", "4월", "5월", "6월", "7월", "8월", "9월", "10월", "11월", "12월"]
+                input_month = st.selectbox("월 선택", all_months, key="input_month")
             
             with col3:
                 # 선택된 월의 주차 리스트
