@@ -1218,15 +1218,23 @@ def dashboard():
         agency_data = [item for item in weekly_data_list if item.get("거래선") == selected_agency]
         
         if agency_data:
+            # 주차명 정렬 함수 (W35, W35A, W35B 모두 35로 인식)
+            def get_week_num(week_str):
+                # "W35" or "W35A" or "W35B" → 35
+                num_str = ''.join(c for c in week_str if c.isdigit())
+                return int(num_str) if num_str else 0
+            
             # 최신 주차순으로 정렬
-            agency_data_sorted = sorted(agency_data, key=lambda x: int(x.get("주차", "W00")[1:3]), reverse=True)
+            agency_data_sorted = sorted(agency_data, key=lambda x: get_week_num(x.get("주차", "W00")), reverse=True)
             
             st.write(f"**총 {len(agency_data_sorted)}개 주차 데이터**")
             
-            for data in agency_data_sorted:
+            # 순회용 인덱스
+            for idx, data in enumerate(agency_data_sorted):
                 week = data.get("주차", "")
                 month = data.get("월", "")
-                week_display = f"**{week}** ({month})"
+                week_display = f"{week} ({month})"
+                unique_key = f"{selected_agency}_{week}_{idx}"  # 중복 방지
                 
                 with st.expander(week_display):
                     # 1. 네이버 스마트 스토어
@@ -1307,19 +1315,19 @@ def dashboard():
                     activity = data.get("당주주요활동", {})
                     
                     if activity.get("구독"):
-                        with st.expander("📌 구독"):
+                        with st.expander("📌 구독", key=f"act_sub_{unique_key}"):
                             st.write(activity.get("구독"))
                     if activity.get("광고운영"):
-                        with st.expander("📌 광고운영"):
+                        with st.expander("📌 광고운영", key=f"act_ad_{unique_key}"):
                             st.write(activity.get("광고운영"))
                     if activity.get("딜판촉"):
-                        with st.expander("📌 딜판촉"):
+                        with st.expander("📌 딜판촉", key=f"act_deal_{unique_key}"):
                             st.write(activity.get("딜판촉"))
                     if activity.get("바이럴컨텐츠운영"):
-                        with st.expander("📌 바이럴/컨텐츠운영"):
+                        with st.expander("📌 바이럴/컨텐츠운영", key=f"act_viral_{unique_key}"):
                             st.write(activity.get("바이럴컨텐츠운영"))
                     if activity.get("기타"):
-                        with st.expander("📌 기타"):
+                        with st.expander("📌 기타", key=f"act_etc_{unique_key}"):
                             st.write(activity.get("기타"))
                     
                     st.write("---")
@@ -1328,13 +1336,13 @@ def dashboard():
                     col1, col2 = st.columns(2)
                     
                     with col1:
-                        if st.button("✏️ 수정", key=f"edit_{selected_agency}_{week}", use_container_width=True):
+                        if st.button("✏️ 수정", key=f"edit_{unique_key}", use_container_width=True):
                             st.session_state.edit_data = data
                             st.session_state.edit_index = weekly_data_list.index(data)
                             st.session_state.edit_mode = True
                     
                     with col2:
-                        if st.button("🗑️ 삭제", key=f"delete_{selected_agency}_{week}", use_container_width=True):
+                        if st.button("🗑️ 삭제", key=f"delete_{unique_key}", use_container_width=True):
                             weekly_data_list.remove(data)
                             with open("weekly_data.json", "w", encoding='utf-8') as f:
                                 json.dump(weekly_data_list, f, ensure_ascii=False, indent=2)
