@@ -825,32 +825,32 @@ def dashboard():
         def get_weeks_by_month(month):
             """해당 월의 주차 리스트 반환 (A/B 표시 포함, 역순)"""
             month_num = int(month.replace('월', ''))
-            weeks_list = []
+            weeks_with_suffix = []
             
             for week, info in weeks_2026.items():
                 month_info = info['month']
-                should_include = False
                 
-                # 단일 월인 경우
+                # 단일 월인 경우 (A/B 없음)
                 if isinstance(month_info, int):
                     if month_info == month_num:
-                        should_include = True
-                        week_display = week
-                # 리스트인 경우 (월 경계)
+                        weeks_with_suffix.append(week)
+                
+                # 리스트인 경우 (월 경계, A/B 있음)
                 elif isinstance(month_info, list):
                     if month_num in month_info:
-                        should_include = True
                         # A/B 결정
                         if month_num == month_info[0]:  # 첫 번째 월 (A)
-                            week_display = f"{week}A"
+                            weeks_with_suffix.append(f"{week}A")
                         else:  # 두 번째 월 (B)
-                            week_display = f"{week}B"
-                
-                if should_include:
-                    weeks_list.append(week_display)
+                            weeks_with_suffix.append(f"{week}B")
             
-            # 역순 정렬
-            return sorted(weeks_list, reverse=True)
+            # 주차 숫자로 정렬 후 역순
+            def sort_key(w):
+                # "W35" → 35, "W35A" → 35, "W35B" → 35
+                num = int(''.join(filter(str.isdigit, w)))
+                return num
+            
+            return sorted(weeks_with_suffix, key=sort_key, reverse=True)
         
         # Form 외부에서 월/주차 선택 (form 내에서 업데이트 안 되는 문제 해결)
         col1, col2, col3 = st.columns(3)
@@ -1020,7 +1020,7 @@ def dashboard():
                         # item이 딕셔너리인지 확인
                         if isinstance(item, dict) and (item.get("거래선") == input_agency and 
                             item.get("월") == input_month and 
-                            item.get("주차") == input_week):
+                            item.get("주차") == base_week):
                             weekly_data_list[idx] = new_data
                             found = True
                             break
@@ -1201,141 +1201,147 @@ def dashboard():
     elif current_page == "거래선현황":
         st.subheader("📋 거래선 현황")
         
+        # weekly_data.json 로드
+        weekly_data_list = []
+        if os.path.exists("weekly_data.json"):
+            try:
+                with open("weekly_data.json", "r", encoding='utf-8') as f:
+                    loaded_data = json.load(f)
+                    weekly_data_list = loaded_data if isinstance(loaded_data, list) else []
+            except:
+                weekly_data_list = []
+        
+        # 거래선별 데이터 필터링
         selected_agency = st.selectbox("거래선 선택", AGENCIES, key="view_agency")
         
-        if selected_agency in weekly_data:
-            for week in sorted(weekly_data[selected_agency].keys(), key=lambda x: int(x), reverse=True):
-                data = weekly_data[selected_agency][week]
-                month_info = data.get('월', '')
-                month_display = f" ({month_info})" if month_info else ""
+        # 선택한 거래선의 데이터만 필터링
+        agency_data = [item for item in weekly_data_list if item.get("거래선") == selected_agency]
+        
+        if agency_data:
+            # 최신 주차순으로 정렬
+            agency_data_sorted = sorted(agency_data, key=lambda x: int(x.get("주차", "W00")[1:3]), reverse=True)
+            
+            st.write(f"**총 {len(agency_data_sorted)}개 주차 데이터**")
+            
+            for data in agency_data_sorted:
+                week = data.get("주차", "")
+                month = data.get("월", "")
+                week_display = f"**{week}** ({month})"
                 
-                with st.expander(f"**{week}주차{month_display}** ({data.get('등록일', '-')})"):
+                with st.expander(week_display):
+                    # 1. 네이버 스마트 스토어
+                    st.subheader("1️⃣ 네이버 스마트 스토어")
+                    ss = data.get("네이버스마트스토어", {})
                     col1, col2, col3 = st.columns(3)
-                    
                     with col1:
-                        st.subheader("🛒 스마트스토어")
-                        ss = data.get('스마트스토어', {})
-                        st.metric("총 고객수", f"{ss.get('총고객수', 0):,}")
-                        st.metric("신규 고객", f"{ss.get('신규고객', 0):,}")
-                        st.metric("재구매", f"{ss.get('재구매', 0):,}")
-                    
+                        st.metric("신규 관심고객수", f"{ss.get('신규관심고객수', 0):,}")
                     with col2:
-                        st.subheader("📱 어필리에이트")
-                        af = data.get('어필리에이트', {})
-                        st.metric("판매액", f"{af.get('판매액', 0):,}")
-                        st.metric("방문수", f"{af.get('방문수', 0):,}")
-                    
+                        st.metric("신규구매 구매자수", f"{ss.get('신규구매구매자수', 0):,}")
                     with col3:
-                        st.subheader("📹 라이브커머스")
-                        lc = data.get('라이브커머스', {})
-                        st.metric("방송 횟수", f"{lc.get('방송횟수', 0)}")
-                        st.metric("판매액", f"{lc.get('판매액', 0):,}")
+                        st.metric("재구매 구매자수", f"{ss.get('재구매구매자수', 0):,}")
+                    
+                    if ss.get("마케팅활동"):
+                        st.write(f"**마케팅활동**: {ss.get('마케팅활동')}")
                     
                     st.write("---")
-                    st.subheader("📢 마케팅활동")
-                    ma = data.get('마케팅활동', {})
                     
-                    if ma.get('어필리에이트'):
-                        with st.expander("□ 어필리에이트"):
-                            st.write(ma.get('어필리에이트'))
-                    if ma.get('네이버'):
-                        with st.expander("□ 네이버"):
-                            st.write(ma.get('네이버'))
-                    if ma.get('광고운영'):
-                        with st.expander("□ 광고운영"):
-                            st.write(ma.get('광고운영'))
+                    # 2. 어필리에이트
+                    st.subheader("2️⃣ 어필리에이트")
+                    
+                    sc = data.get("쇼핑커넥트", {})
+                    st.write("🔹 **쇼핑커넥트**")
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("크리에이터 운영 수", f"{sc.get('크리에이터운영수', 0)}")
+                    with col2:
+                        st.metric("운영 모델 수", f"{sc.get('운영모델수', 0)}")
+                    with col3:
+                        st.metric("유입수", f"{sc.get('유입수', 0):,}")
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.metric("상품주문건수", f"{sc.get('상품주문건수', 0)}")
+                    with col2:
+                        st.metric("주문금액(백만)", f"{sc.get('주문금액', 0):.1f}")
+                    
+                    if sc.get("마케팅활동"):
+                        st.write(f"**마케팅활동**: {sc.get('마케팅활동')}")
+                    
+                    st.write("")
+                    
+                    cj = data.get("공동구매", {})
+                    st.write("🔹 **공동구매**")
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("크리에이터 운영 수", f"{cj.get('크리에이터운영수', 0)}")
+                    with col2:
+                        st.metric("운영 모델 수", f"{cj.get('운영모델수', 0)}")
+                    with col3:
+                        st.metric("상품주문건수", f"{cj.get('상품주문건수', 0)}")
+                    
+                    st.metric("주문금액(백만)", f"{cj.get('주문금액', 0):.1f}")
+                    
+                    if cj.get("마케팅활동"):
+                        st.write(f"**마케팅활동**: {cj.get('마케팅활동')}")
+                    
+                    st.write("---")
+                    
+                    # 3. AI 라이브
+                    st.subheader("🎥 3️⃣ AI 라이브")
+                    live = data.get("AI라이브", {})
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("방송횟수", f"{live.get('방송횟수', 0)}")
+                    with col2:
+                        st.metric("방송매출(백만)", f"{live.get('방송매출', 0):.1f}")
+                    with col3:
+                        st.metric("소요비용(백만)", f"{live.get('소요비용', 0):.2f}")
+                    
+                    if live.get("마케팅활동"):
+                        st.write(f"**마케팅활동**: {live.get('마케팅활동')}")
+                    
+                    st.write("---")
+                    
+                    # 4. 당주 주요활동
+                    st.subheader("🎯 당주 주요활동")
+                    activity = data.get("당주주요활동", {})
+                    
+                    if activity.get("구독"):
+                        with st.expander("📌 구독"):
+                            st.write(activity.get("구독"))
+                    if activity.get("광고운영"):
+                        with st.expander("📌 광고운영"):
+                            st.write(activity.get("광고운영"))
+                    if activity.get("딜판촉"):
+                        with st.expander("📌 딜판촉"):
+                            st.write(activity.get("딜판촉"))
+                    if activity.get("바이럴컨텐츠운영"):
+                        with st.expander("📌 바이럴/컨텐츠운영"):
+                            st.write(activity.get("바이럴컨텐츠운영"))
+                    if activity.get("기타"):
+                        with st.expander("📌 기타"):
+                            st.write(activity.get("기타"))
                     
                     st.write("---")
                     st.subheader("⚙️ 데이터 관리")
                     
                     col1, col2 = st.columns(2)
+                    
                     with col1:
                         if st.button("✏️ 수정", key=f"edit_{selected_agency}_{week}", use_container_width=True):
+                            st.session_state.edit_data = data
+                            st.session_state.edit_index = weekly_data_list.index(data)
                             st.session_state.edit_mode = True
-                            st.session_state.edit_week = week
-                            st.session_state.edit_agency = selected_agency
+                    
                     with col2:
                         if st.button("🗑️ 삭제", key=f"delete_{selected_agency}_{week}", use_container_width=True):
-                            del weekly_data[selected_agency][week]
-                            save_weekly_data(weekly_data)
-                            st.success(f"✅ {selected_agency} {week}주차 삭제됨!")
+                            weekly_data_list.remove(data)
+                            with open("weekly_data.json", "w", encoding='utf-8') as f:
+                                json.dump(weekly_data_list, f, ensure_ascii=False, indent=2)
+                            st.success(f"✅ {selected_agency} - {week} ({month}) 데이터 삭제됨!")
                             st.rerun()
-                    
-                    # 수정 모드
-                    if st.session_state.get('edit_mode') and st.session_state.get('edit_week') == week and st.session_state.get('edit_agency') == selected_agency:
-                        st.write("---")
-                        st.subheader("📝 데이터 수정")
-                        
-                        with st.form("edit_weekly_form"):
-                            col1, col2, col3 = st.columns(3)
-                            with col1:
-                                months_list = ["7월", "8월"]
-                                current_month = data.get('월', '7월')
-                                month_index = months_list.index(current_month) if current_month in months_list else 0
-                                edit_month = st.selectbox("월", months_list, index=month_index, key="edit_month")
-                            
-                            st.write("---")
-                            st.subheader("1️⃣ 스마트스토어")
-                            col1, col2, col3 = st.columns(3)
-                            ss = data.get('스마트스토어', {})
-                            with col1:
-                                edit_ss_total = st.number_input("총 고객수", min_value=0, step=1, value=ss.get('총고객수', 0), key="edit_ss_total")
-                            with col2:
-                                edit_ss_new = st.number_input("신규 고객수", min_value=0, step=1, value=ss.get('신규고객', 0), key="edit_ss_new")
-                            with col3:
-                                edit_ss_repeat = st.number_input("재구매 고객수", min_value=0, step=1, value=ss.get('재구매', 0), key="edit_ss_repeat")
-                            
-                            st.write("---")
-                            st.subheader("2️⃣ 어필리에이트")
-                            col1, col2 = st.columns(2)
-                            af = data.get('어필리에이트', {})
-                            with col1:
-                                edit_af_sales = st.number_input("판매액 (원)", min_value=0, step=100000, value=af.get('판매액', 0), key="edit_af_sales")
-                            with col2:
-                                edit_af_visits = st.number_input("방문수", min_value=0, step=1, value=af.get('방문수', 0), key="edit_af_visits")
-                            edit_af_notes = st.text_area("특이사항", height=60, value=af.get('특이사항', ''), key="edit_af_notes")
-                            
-                            st.write("---")
-                            st.subheader("3️⃣ 라이브커머스")
-                            col1, col2 = st.columns(2)
-                            lc = data.get('라이브커머스', {})
-                            with col1:
-                                edit_live_count = st.number_input("방송 횟수", min_value=0, step=1, value=lc.get('방송횟수', 0), key="edit_live_count")
-                            with col2:
-                                edit_live_sales = st.number_input("판매액 (원)", min_value=0, step=100000, value=lc.get('판매액', 0), key="edit_live_sales")
-                            edit_live_notes = st.text_area("특이사항", height=60, value=lc.get('특이사항', ''), key="edit_live_notes")
-                            
-                            st.write("---")
-                            st.subheader("4️⃣ 마케팅활동")
-                            col1, col2, col3 = st.columns(3)
-                            ma = data.get('마케팅활동', {})
-                            with col1:
-                                st.write("**□ 어필리에이트**")
-                                edit_aff_activity = st.text_area("활동", height=80, value=ma.get('어필리에이트', ''), key="edit_aff_activity")
-                            with col2:
-                                st.write("**□ 네이버**")
-                                edit_nav_activity = st.text_area("활동", height=80, value=ma.get('네이버', ''), key="edit_nav_activity")
-                            with col3:
-                                st.write("**□ 광고운영**")
-                                edit_ad_activity = st.text_area("활동", height=80, value=ma.get('광고운영', ''), key="edit_ad_activity")
-                            
-                            st.write("---")
-                            
-                            if st.form_submit_button("💾 저장", use_container_width=True):
-                                weekly_data[selected_agency][week] = {
-                                    "월": edit_month,
-                                    "등록일": data.get('등록일'),
-                                    "스마트스토어": {"총고객수": edit_ss_total, "신규고객": edit_ss_new, "재구매": edit_ss_repeat},
-                                    "어필리에이트": {"판매액": edit_af_sales, "방문수": edit_af_visits, "특이사항": edit_af_notes},
-                                    "라이브커머스": {"방송횟수": edit_live_count, "판매액": edit_live_sales, "특이사항": edit_live_notes},
-                                    "마케팅활동": {"어필리에이트": edit_aff_activity, "네이버": edit_nav_activity, "광고운영": edit_ad_activity}
-                                }
-                                save_weekly_data(weekly_data)
-                                st.session_state.edit_mode = False
-                                st.success(f"✅ {selected_agency} {week}주차 수정됨!")
-                                st.rerun()
         else:
-            st.info("등록된 데이터가 없습니다")
+            st.info(f"등록된 데이터가 없습니다")
     
     # 담당자 피드백
     elif current_page == "담당자피드백":
