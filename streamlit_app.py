@@ -838,75 +838,83 @@ def dashboard():
             # 역순 정렬
             return sorted(weeks_list, reverse=True)
         
+        # Form 외부에서 월/주차 선택 (form 내에서 업데이트 안 되는 문제 해결)
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            input_agency = st.selectbox("거래선 선택", AGENCIES, key="input_agency")
+        
+        with col2:
+            # 월 선택 (1-12월 동적)
+            all_months = ["1월", "2월", "3월", "4월", "5월", "6월", "7월", "8월", "9월", "10월", "11월", "12월"]
+            input_month = st.selectbox("월 선택", all_months, key="input_month")
+        
+        with col3:
+            # 선택된 월의 주차 리스트
+            available_weeks = get_weeks_by_month(input_month)
+            if available_weeks:
+                input_week = st.selectbox("주차 선택", available_weeks, key="input_week")
+            else:
+                st.warning(f"{input_month}에 데이터가 없습니다")
+                input_week = None
+        
+        st.write("---")
+        
         with st.form("weekly_form"):
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                input_agency = st.selectbox("거래선 선택", AGENCIES, key="input_agency")
-            
-            with col2:
-                # 월 선택 (1-12월 동적)
-                all_months = ["1월", "2월", "3월", "4월", "5월", "6월", "7월", "8월", "9월", "10월", "11월", "12월"]
-                input_month = st.selectbox("월 선택", all_months, key="input_month")
-            
-            with col3:
-                # 선택된 월의 주차 리스트
-                available_weeks = get_weeks_by_month(input_month)
-                if available_weeks:
-                    input_week = st.selectbox("주차 선택", available_weeks, key="input_week")
-                else:
-                    st.warning(f"{input_month}에 데이터가 없습니다")
-                    input_week = None
-            
-            st.write("---")
-            
-            if input_week:
-                # 선택된 주차 정보 표시
-                week_info = weeks_2026.get(input_week, {})
-                st.caption(f"📅 {input_week}: {week_info.get('start', '')} ~ {week_info.get('end', '')}")
-            
-            st.subheader("1️⃣ 스마트스토어")
+            st.subheader("📝 1️⃣ 네이버 스마트 스토어")
             col1, col2, col3 = st.columns(3)
             with col1:
-                ss_total = st.number_input("총 고객수", min_value=0, step=1, key="ss_total_input")
+                ss_new_interest = st.number_input("신규 관심고객수", min_value=0, step=1, key="ss_new_interest_input")
             with col2:
-                ss_new = st.number_input("신규 고객수", min_value=0, step=1, key="ss_new_input")
+                ss_new_buyer = st.number_input("신규구매 구매자수", min_value=0, step=1, key="ss_new_buyer_input")
             with col3:
-                ss_orders = st.number_input("주문건수", min_value=0, step=1, key="ss_orders_input")
+                ss_repurchase = st.number_input("재구매 구매자수", min_value=0, step=1, key="ss_repurchase_input")
             
-            ss_amount = st.number_input("판매액 (백만)", min_value=0.0, step=0.1, key="ss_amount_input")
+            ss_activity = st.text_area("📌 마케팅활동", placeholder="이번 주 스마트스토어 마케팅 활동을 작성해주세요", height=60, key="ss_activity_input")
             
             st.write("---")
-            st.subheader("2️⃣ 어필리에이트")
+            st.subheader("📱 2️⃣ 어필리에이트")
             
-            col1, col2 = st.columns(2)
+            # 쇼핑커넥트
+            st.write("🔹 **쇼핑커넥트**")
+            col1, col2, col3 = st.columns(3)
             with col1:
-                st.write("**어필리에이트**")
-                af_creator = st.number_input("크리에이터 운영수", min_value=0, step=1, key="af_creator_input")
-                af_model = st.number_input("운영모델", min_value=0, step=1, key="af_model_input")
-                af_orders = st.number_input("주문건수", min_value=-999, step=1, key="af_orders_input")
-                af_amount = st.number_input("주문금액 (백만)", min_value=-999.0, step=0.1, key="af_amount_input")
-            
+                sc_creator = st.number_input("크리에이터 운영 수", min_value=0, step=1, key="sc_creator_input")
             with col2:
-                st.write("**쇼핑커넥트**")
-                sc_creator = st.number_input("크리에이터 운영수 (SC)", min_value=0, step=1, key="sc_creator_input")
-                sc_model = st.number_input("운영모델 (SC)", min_value=0, step=1, key="sc_model_input")
+                sc_model = st.number_input("운영 모델 수", min_value=0, step=1, key="sc_model_input")
+            with col3:
                 sc_visits = st.number_input("유입수", min_value=0, step=1, key="sc_visits_input")
-                sc_orders = st.number_input("상품주문", min_value=-999, step=1, key="sc_orders_input")
-                sc_amount = st.number_input("주문금액 (백만) (SC)", min_value=-999.0, step=0.1, key="sc_amount_input")
             
-            st.write("---")
-            st.subheader("3️⃣ 공동구매")
             col1, col2 = st.columns(2)
             with col1:
-                cj_creator = st.number_input("크리에이터 운영수 (공동)", min_value=0, step=1, key="cj_creator_input")
-                cj_model = st.number_input("운영모델 (공동)", min_value=0, step=1, key="cj_model_input")
+                sc_orders = st.number_input("상품주문건수", min_value=-999, step=1, key="sc_orders_input")
             with col2:
-                cj_orders = st.number_input("상품주문 (공동)", min_value=0, step=1, key="cj_orders_input")
-                cj_amount = st.number_input("주문금액 (백만) (공동)", min_value=0.0, step=0.1, key="cj_amount_input")
+                sc_amount = st.number_input("주문금액 (백만)", min_value=-999.0, step=0.1, key="sc_amount_input")
+            
+            sc_activity = st.text_area("📌 마케팅활동", placeholder="쇼핑커넥트 마케팅 활동을 작성해주세요", height=60, key="sc_activity_input")
+            
+            st.write("")
+            
+            # 공동구매
+            st.write("🔹 **공동구매**")
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                cj_creator = st.number_input("크리에이터 운영 수", min_value=0, step=1, key="cj_creator_input")
+            with col2:
+                cj_model = st.number_input("운영 모델 수", min_value=0, step=1, key="cj_model_input")
+            with col3:
+                st.write("")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                cj_orders = st.number_input("상품주문건수", min_value=-999, step=1, key="cj_orders_input")
+            with col2:
+                cj_amount = st.number_input("주문금액 (백만)", min_value=-999.0, step=0.1, key="cj_amount_input")
+            
+            cj_activity = st.text_area("📌 마케팅활동", placeholder="공동구매 마케팅 활동을 작성해주세요", height=60, key="cj_activity_input")
             
             st.write("---")
-            st.subheader("4️⃣ 라이브커머스")
+            st.subheader("🎥 3️⃣ AI 라이브")
             col1, col2, col3 = st.columns(3)
             with col1:
                 live_count = st.number_input("방송횟수", min_value=0, step=1, key="live_count_input")
@@ -914,6 +922,17 @@ def dashboard():
                 live_sale = st.number_input("방송매출 (백만)", min_value=0.0, step=0.1, key="live_sale_input")
             with col3:
                 live_cost = st.number_input("소요비용 (백만)", min_value=0.0, step=0.01, key="live_cost_input")
+            
+            live_activity = st.text_area("📌 마케팅활동", placeholder="AI 라이브 마케팅 활동을 작성해주세요", height=60, key="live_activity_input")
+            
+            st.write("---")
+            st.subheader("🎯 당주 주요활동")
+            
+            activity_구독 = st.text_area("📌 구독", placeholder="구독 관련 활동을 작성해주세요", height=50, key="activity_구독_input")
+            activity_광고 = st.text_area("📌 광고운영", placeholder="광고운영 관련 활동을 작성해주세요", height=50, key="activity_광고_input")
+            activity_딜 = st.text_area("📌 딜판촉", placeholder="딜판촉 관련 활동을 작성해주세요", height=50, key="activity_딜_input")
+            activity_바이럴 = st.text_area("📌 바이럴/컨텐츠운영", placeholder="바이럴/컨텐츠운영 관련 활동을 작성해주세요", height=50, key="activity_바이럴_input")
+            activity_기타 = st.text_area("📌 기타", placeholder="기타 활동을 작성해주세요", height=50, key="activity_기타_input")
             
             st.write("---")
             
@@ -923,40 +942,44 @@ def dashboard():
                 if input_week is None:
                     st.error("주차를 선택해주세요")
                 else:
-                    # 데이터 조합
+                    # 데이터 조합 (새로운 구조)
                     new_data = {
                         "거래선": input_agency,
                         "월": input_month,
                         "주차": input_week,
-                        "스마트스토어": {
-                            "총고객수": ss_total,
-                            "신규고객수": ss_new,
-                            "주문건수": ss_orders,
-                            "판매액": ss_amount
-                        },
-                        "어필리에이트": {
-                            "크리에이터": af_creator,
-                            "운영모델": af_model,
-                            "주문건수": af_orders,
-                            "주문금액": af_amount
+                        "네이버스마트스토어": {
+                            "신규관심고객수": ss_new_interest,
+                            "신규구매구매자수": ss_new_buyer,
+                            "재구매구매자수": ss_repurchase,
+                            "마케팅활동": ss_activity
                         },
                         "쇼핑커넥트": {
-                            "크리에이터": sc_creator,
-                            "운영모델": sc_model,
+                            "크리에이터운영수": sc_creator,
+                            "운영모델수": sc_model,
                             "유입수": sc_visits,
-                            "주문건수": sc_orders,
-                            "주문금액": sc_amount
+                            "상품주문건수": sc_orders,
+                            "주문금액": sc_amount,
+                            "마케팅활동": sc_activity
                         },
                         "공동구매": {
-                            "크리에이터": cj_creator,
-                            "운영모델": cj_model,
-                            "주문건수": cj_orders,
-                            "주문금액": cj_amount
+                            "크리에이터운영수": cj_creator,
+                            "운영모델수": cj_model,
+                            "상품주문건수": cj_orders,
+                            "주문금액": cj_amount,
+                            "마케팅활동": cj_activity
                         },
-                        "라이브커머스": {
+                        "AI라이브": {
                             "방송횟수": live_count,
                             "방송매출": live_sale,
-                            "소요비용": live_cost
+                            "소요비용": live_cost,
+                            "마케팅활동": live_activity
+                        },
+                        "당주주요활동": {
+                            "구독": activity_구독,
+                            "광고운영": activity_광고,
+                            "딜판촉": activity_딜,
+                            "바이럴컨텐츠운영": activity_바이럴,
+                            "기타": activity_기타
                         }
                     }
                     
