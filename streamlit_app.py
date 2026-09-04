@@ -823,17 +823,31 @@ def dashboard():
         
         # 월별 주차 매핑
         def get_weeks_by_month(month):
-            """해당 월의 주차 리스트 반환 (역순)"""
+            """해당 월의 주차 리스트 반환 (A/B 표시 포함, 역순)"""
             month_num = int(month.replace('월', ''))
             weeks_list = []
             
             for week, info in weeks_2026.items():
                 month_info = info['month']
-                if isinstance(month_info, list):
+                should_include = False
+                
+                # 단일 월인 경우
+                if isinstance(month_info, int):
+                    if month_info == month_num:
+                        should_include = True
+                        week_display = week
+                # 리스트인 경우 (월 경계)
+                elif isinstance(month_info, list):
                     if month_num in month_info:
-                        weeks_list.append(week)
-                elif month_info == month_num:
-                    weeks_list.append(week)
+                        should_include = True
+                        # A/B 결정
+                        if month_num == month_info[0]:  # 첫 번째 월 (A)
+                            week_display = f"{week}A"
+                        else:  # 두 번째 월 (B)
+                            week_display = f"{week}B"
+                
+                if should_include:
+                    weeks_list.append(week_display)
             
             # 역순 정렬
             return sorted(weeks_list, reverse=True)
@@ -942,11 +956,16 @@ def dashboard():
                 if input_week is None:
                     st.error("주차를 선택해주세요")
                 else:
+                    # 주차에서 A/B 제거 (저장용 기본 주차명)
+                    # 예: "W35B" → "W35"
+                    base_week = input_week.replace('A', '').replace('B', '')
+                    
                     # 데이터 조합 (새로운 구조)
                     new_data = {
                         "거래선": input_agency,
                         "월": input_month,
-                        "주차": input_week,
+                        "주차": base_week,  # A/B 제거한 주차명 저장
+                        "주차_표시": input_week,  # 화면에 보여줬던 형식 저장 (A/B 포함)
                         "네이버스마트스토어": {
                             "신규관심고객수": ss_new_interest,
                             "신규구매구매자수": ss_new_buyer,
@@ -985,15 +1004,21 @@ def dashboard():
                     
                     # weekly_data.json에 저장
                     if os.path.exists("weekly_data.json"):
-                        with open("weekly_data.json", "r", encoding='utf-8') as f:
-                            weekly_data_list = json.load(f)
+                        try:
+                            with open("weekly_data.json", "r", encoding='utf-8') as f:
+                                loaded_data = json.load(f)
+                                # 리스트인지 확인, 아니면 빈 리스트로
+                                weekly_data_list = loaded_data if isinstance(loaded_data, list) else []
+                        except:
+                            weekly_data_list = []
                     else:
                         weekly_data_list = []
                     
                     # 중복 확인 및 업데이트
                     found = False
                     for idx, item in enumerate(weekly_data_list):
-                        if (item.get("거래선") == input_agency and 
+                        # item이 딕셔너리인지 확인
+                        if isinstance(item, dict) and (item.get("거래선") == input_agency and 
                             item.get("월") == input_month and 
                             item.get("주차") == input_week):
                             weekly_data_list[idx] = new_data
