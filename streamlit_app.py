@@ -1347,68 +1347,153 @@ def dashboard():
     elif current_page == "담당자피드백":
         st.subheader("💬 담당자 피드백")
         
-        feedback_agency = st.selectbox("거래선 선택", AGENCIES, key="feedback_agency")
+        # weekly_data.json 로드
+        weekly_data_list = []
+        if os.path.exists("weekly_data.json"):
+            try:
+                with open("weekly_data.json", "r", encoding='utf-8') as f:
+                    loaded_data = json.load(f)
+                    weekly_data_list = loaded_data if isinstance(loaded_data, list) else []
+            except:
+                weekly_data_list = []
         
-        if feedback_agency in weekly_data:
-            recent_weeks = sorted(weekly_data[feedback_agency].items(), key=lambda x: int(x[0]), reverse=True)[:5]
+        # feedback.json 로드
+        feedback_data = {}
+        if os.path.exists("feedback.json"):
+            try:
+                with open("feedback.json", "r", encoding='utf-8') as f:
+                    feedback_data = json.load(f)
+            except:
+                feedback_data = {}
+        
+        # 거래선별 필터링
+        selected_agency = st.selectbox("거래선 선택", AGENCIES, key="feedback_agency")
+        
+        # 선택한 거래선의 데이터만 필터링
+        agency_data = [item for item in weekly_data_list if item.get("거래선") == selected_agency]
+        
+        if agency_data:
+            # 최신 주차순으로 정렬
+            agency_data_sorted = sorted(agency_data, key=lambda x: int(x.get("주차", "W00")[1:3]), reverse=True)
             
-            for week, data in recent_weeks:
-                month_info = data.get('월', '')
-                month_display = f" ({month_info})" if month_info else ""
+            for data in agency_data_sorted:
+                week = data.get("주차", "")
+                month = data.get("월", "")
+                week_key = f"{selected_agency}_{week}"
                 
-                st.write(f"### {week}주차{month_display}")
-                
-                # 데이터 표시
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("스마트스토어", f"{data.get('스마트스토어', {}).get('총고객수', 0):,}")
-                with col2:
-                    st.metric("어필리에이트", f"{data.get('어필리에이트', {}).get('판매액', 0):,}")
-                with col3:
-                    st.metric("라이브", f"{data.get('라이브커머스', {}).get('방송횟수', 0)}")
-                
-                st.write("---")
-                
-                # 각 항목별 피드백
-                st.subheader("📝 세부 피드백")
-                
-                col1, col2, col3 = st.columns(3)
-                
-                with col1:
-                    st.write("**🛒 스마트스토어**")
-                    ss_comment = st.text_area("의견", height=60, key=f"fb_ss_{feedback_agency}_{week}")
-                
-                with col2:
-                    st.write("**📱 어필리에이트**")
-                    af_comment = st.text_area("의견", height=60, key=f"fb_af_{feedback_agency}_{week}")
-                
-                with col3:
-                    st.write("**📹 라이브커머스**")
-                    lc_comment = st.text_area("의견", height=60, key=f"fb_lc_{feedback_agency}_{week}")
-                
-                st.write("---")
-                
-                st.write("**📢 마케팅활동**")
-                marketing_comment = st.text_area("의견", height=60, key=f"fb_marketing_{feedback_agency}_{week}")
-                
-                st.write("---")
-                
-                if st.button("💾 저장", key=f"fb_save_{feedback_agency}_{week}", use_container_width=True):
-                    if feedback_agency not in feedback_data:
-                        feedback_data[feedback_agency] = {}
+                with st.expander(f"**{week}** ({month})"):
+                    # 데이터 대시보드
+                    st.subheader("📊 입력 데이터")
                     
-                    feedback_data[feedback_agency][week] = {
-                        "스마트스토어": ss_comment,
-                        "어필리에이트": af_comment,
-                        "라이브커머스": lc_comment,
-                        "마케팅활동": marketing_comment,
-                        "date": datetime.now().strftime("%Y-%m-%d %H:%M")
-                    }
+                    col1, col2, col3 = st.columns(3)
                     
-                    save_feedback(feedback_data)
-                    st.success("✅ 피드백 저장됨!")
-                
-                st.divider()
+                    with col1:
+                        st.write("**🛒 네이버 스마트 스토어**")
+                        ss = data.get("네이버스마트스토어", {})
+                        st.text(f"신규 관심고객: {ss.get('신규관심고객수', 0):,}")
+                        st.text(f"신규구매 구매자: {ss.get('신규구매구매자수', 0):,}")
+                        st.text(f"재구매 구매자: {ss.get('재구매구매자수', 0):,}")
+                        if ss.get("마케팅활동"):
+                            st.caption(f"활동: {ss.get('마케팅활동')}")
+                    
+                    with col2:
+                        st.write("**📱 어필리에이트**")
+                        
+                        sc = data.get("쇼핑커넥트", {})
+                        st.text(f"[쇼핑커넥트]")
+                        st.text(f"크리에이터: {sc.get('크리에이터운영수', 0)} / 모델: {sc.get('운영모델수', 0)}")
+                        st.text(f"주문: {sc.get('상품주문건수', 0)} / 금액: {sc.get('주문금액', 0):.1f}백만")
+                        
+                        cj = data.get("공동구매", {})
+                        st.text(f"[공동구매]")
+                        st.text(f"크리에이터: {cj.get('크리에이터운영수', 0)} / 모델: {cj.get('운영모델수', 0)}")
+                        st.text(f"주문: {cj.get('상품주문건수', 0)} / 금액: {cj.get('주문금액', 0):.1f}백만")
+                    
+                    with col3:
+                        st.write("**🎥 AI 라이브**")
+                        live = data.get("AI라이브", {})
+                        st.text(f"방송횟수: {live.get('방송횟수', 0)}")
+                        st.text(f"방송매출: {live.get('방송매출', 0):.1f}백만")
+                        st.text(f"소요비용: {live.get('소요비용', 0):.2f}백만")
+                        if live.get("마케팅활동"):
+                            st.caption(f"활동: {live.get('마케팅활동')}")
+                    
+                    st.write("---")
+                    
+                    # 담당자 피드백 입력
+                    st.subheader("📝 담당자 피드백")
+                    
+                    # 기존 피드백 로드
+                    existing_feedback = feedback_data.get(week_key, {})
+                    
+                    with st.form(f"feedback_form_{week_key}"):
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            st.write("**🛒 네이버 스마트 스토어**")
+                            ss_feedback = st.text_area(
+                                "피드백", 
+                                value=existing_feedback.get("네이버스마트스토어", ""),
+                                height=80,
+                                key=f"ss_fb_{week_key}",
+                                label_visibility="collapsed"
+                            )
+                        
+                        with col2:
+                            st.write("**📱 어필리에이트**")
+                            af_feedback = st.text_area(
+                                "피드백",
+                                value=existing_feedback.get("어필리에이트", ""),
+                                height=80,
+                                key=f"af_fb_{week_key}",
+                                label_visibility="collapsed"
+                            )
+                        
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            st.write("**🎥 AI 라이브**")
+                            live_feedback = st.text_area(
+                                "피드백",
+                                value=existing_feedback.get("AI라이브", ""),
+                                height=80,
+                                key=f"live_fb_{week_key}",
+                                label_visibility="collapsed"
+                            )
+                        
+                        with col2:
+                            st.write("**🎯 당주 주요활동**")
+                            activity_feedback = st.text_area(
+                                "피드백",
+                                value=existing_feedback.get("당주주요활동", ""),
+                                height=80,
+                                key=f"activity_fb_{week_key}",
+                                label_visibility="collapsed"
+                            )
+                        
+                        st.write("---")
+                        
+                        if st.form_submit_button("💾 피드백 저장", use_container_width=True):
+                            # 피드백 데이터 저장
+                            feedback_data[week_key] = {
+                                "거래선": selected_agency,
+                                "주차": week,
+                                "월": month,
+                                "네이버스마트스토어": ss_feedback,
+                                "어필리에이트": af_feedback,
+                                "AI라이브": live_feedback,
+                                "당주주요활동": activity_feedback,
+                                "저장일시": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                            }
+                            
+                            # feedback.json에 저장
+                            with open("feedback.json", "w", encoding='utf-8') as f:
+                                json.dump(feedback_data, f, ensure_ascii=False, indent=2)
+                            
+                            st.success("✅ 피드백이 저장되었습니다!")
+                            st.rerun()
+        else:
+            st.info(f"등록된 데이터가 없습니다")
 
 # 메인
 if st.session_state.user_name is None:
