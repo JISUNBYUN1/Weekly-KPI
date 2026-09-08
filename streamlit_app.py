@@ -902,9 +902,9 @@ def dashboard():
             
             col1, col2 = st.columns(2)
             with col1:
-                sc_orders = st.number_input("상품주문건수", min_value=-999, step=1, key="sc_orders_input")
+                sc_orders = st.number_input("상품주문건수", min_value=0, step=1, key="sc_orders_input")
             with col2:
-                sc_amount = st.number_input("주문금액 (백만)", min_value=-999.0, step=0.1, key="sc_amount_input")
+                sc_amount = st.number_input("주문금액", min_value=0, step=1, key="sc_amount_input")
             
             sc_activity = st.text_area("📌 마케팅활동", placeholder="쇼핑커넥트 마케팅 활동을 작성해주세요", height=60, key="sc_activity_input")
             
@@ -922,9 +922,9 @@ def dashboard():
             
             col1, col2 = st.columns(2)
             with col1:
-                cj_orders = st.number_input("상품주문건수", min_value=-999, step=1, key="cj_orders_input")
+                cj_orders = st.number_input("상품주문건수", min_value=0, step=1, key="cj_orders_input")
             with col2:
-                cj_amount = st.number_input("주문금액 (백만)", min_value=-999.0, step=0.1, key="cj_amount_input")
+                cj_amount = st.number_input("주문금액", min_value=0, step=1, key="cj_amount_input")
             
             cj_activity = st.text_area("📌 마케팅활동", placeholder="공동구매 마케팅 활동을 작성해주세요", height=60, key="cj_activity_input")
             
@@ -934,9 +934,9 @@ def dashboard():
             with col1:
                 live_count = st.number_input("방송횟수", min_value=0, step=1, key="live_count_input")
             with col2:
-                live_sale = st.number_input("방송매출 (백만)", min_value=0.0, step=0.1, key="live_sale_input")
+                live_sale = st.number_input("방송매출", min_value=0, step=1, key="live_sale_input")
             with col3:
-                live_cost = st.number_input("소요비용 (백만)", min_value=0.0, step=0.01, key="live_cost_input")
+                live_cost = st.number_input("소요비용", min_value=0, step=1, key="live_cost_input")
             
             live_activity = st.text_area("📌 마케팅활동", placeholder="AI 라이브 마케팅 활동을 작성해주세요", height=60, key="live_activity_input")
             
@@ -1254,11 +1254,11 @@ def dashboard():
                             ss = data.get("네이버스마트스토어", {})
                             col1, col2, col3 = st.columns(3)
                             with col1:
-                                ss_interest = st.number_input("신규 관심고객수", min_value=0, step=1, value=ss.get('신규관심고객수', 0), key=f"edit_ss_interest_{unique_key}")
+                                ss_interest = st.number_input("신규 관심고객수", min_value=0, step=1, value=max(0, ss.get('신규관심고객수', 0)), key=f"edit_ss_interest_{unique_key}")
                             with col2:
-                                ss_new = st.number_input("신규구매 구매자수", min_value=0, step=1, value=ss.get('신규구매구매자수', 0), key=f"edit_ss_new_{unique_key}")
+                                ss_new = st.number_input("신규구매 구매자수", min_value=0, step=1, value=max(0, ss.get('신규구매구매자수', 0)), key=f"edit_ss_new_{unique_key}")
                             with col3:
-                                ss_repurchase = st.number_input("재구매 구매자수", min_value=0, step=1, value=ss.get('재구매구매자수', 0), key=f"edit_ss_repurchase_{unique_key}")
+                                ss_repurchase = st.number_input("재구매 구매자수", min_value=0, step=1, value=max(0, ss.get('재구매구매자수', 0)), key=f"edit_ss_repurchase_{unique_key}")
                             ss_activity = st.text_area("마케팅활동", value=ss.get('마케팅활동', ''), height=50, key=f"edit_ss_activity_{unique_key}")
                             
                             st.write("---")
@@ -1270,16 +1270,16 @@ def dashboard():
                             st.write("🔹 **쇼핑커넥트**")
                             col1, col2, col3 = st.columns(3)
                             with col1:
-                                sc_creator = st.number_input("크리에이터 운영 수", min_value=0, step=1, value=sc.get('크리에이터운영수', 0), key=f"edit_sc_creator_{unique_key}")
+                                sc_creator = st.number_input("크리에이터 운영 수", min_value=0, step=1, value=max(0, sc.get('크리에이터운영수', 0)), key=f"edit_sc_creator_{unique_key}")
                             with col2:
-                                sc_model = st.number_input("운영 모델 수", min_value=0, step=1, value=sc.get('운영모델수', 0), key=f"edit_sc_model_{unique_key}")
+                                sc_model = st.number_input("운영 모델 수", min_value=0, step=1, value=max(0, sc.get('운영모델수', 0)), key=f"edit_sc_model_{unique_key}")
                             with col3:
-                                sc_visits = st.number_input("유입수", min_value=0, step=1, value=sc.get('유입수', 0), key=f"edit_sc_visits_{unique_key}")
+                                sc_visits = st.number_input("유입수", min_value=0, step=1, value=max(0, sc.get('유입수', 0)), key=f"edit_sc_visits_{unique_key}")
                             col1, col2 = st.columns(2)
                             with col1:
-                                sc_orders = st.number_input("상품주문건수", min_value=0, step=1, value=sc.get('상품주문건수', 0), key=f"edit_sc_orders_{unique_key}")
+                                sc_orders = st.number_input("상품주문건수", min_value=0, step=1, value=max(0, sc.get('상품주문건수', 0)), key=f"edit_sc_orders_{unique_key}")
                             with col2:
-                                sc_amount = st.number_input("주문금액 (전체 금액)", min_value=0, step=1, value=int(sc.get('주문금액', 0) * 1000000), key=f"edit_sc_amount_{unique_key}")
+                                sc_amount = st.number_input("주문금액 (전체 금액)", min_value=0, step=1, value=max(0, int(sc.get('주문금액', 0) * 1000000)), key=f"edit_sc_amount_{unique_key}")
                             sc_activity = st.text_area("마케팅활동", value=sc.get('마케팅활동', ''), height=40, key=f"edit_sc_activity_{unique_key}")
                             
                             st.write("")
@@ -1288,14 +1288,14 @@ def dashboard():
                             st.write("🔹 **공동구매**")
                             col1, col2 = st.columns(2)
                             with col1:
-                                cj_creator = st.number_input("크리에이터 운영 수", min_value=0, step=1, value=cj.get('크리에이터운영수', 0), key=f"edit_cj_creator_{unique_key}")
+                                cj_creator = st.number_input("크리에이터 운영 수", min_value=0, step=1, value=max(0, cj.get('크리에이터운영수', 0)), key=f"edit_cj_creator_{unique_key}")
                             with col2:
-                                cj_model = st.number_input("운영 모델 수", min_value=0, step=1, value=cj.get('운영모델수', 0), key=f"edit_cj_model_{unique_key}")
+                                cj_model = st.number_input("운영 모델 수", min_value=0, step=1, value=max(0, cj.get('운영모델수', 0)), key=f"edit_cj_model_{unique_key}")
                             col1, col2 = st.columns(2)
                             with col1:
-                                cj_orders = st.number_input("상품주문건수", min_value=0, step=1, value=cj.get('상품주문건수', 0), key=f"edit_cj_orders_{unique_key}")
+                                cj_orders = st.number_input("상품주문건수", min_value=0, step=1, value=max(0, cj.get('상품주문건수', 0)), key=f"edit_cj_orders_{unique_key}")
                             with col2:
-                                cj_amount = st.number_input("주문금액 (전체 금액)", min_value=0, step=1, value=int(cj.get('주문금액', 0) * 1000000), key=f"edit_cj_amount_{unique_key}")
+                                cj_amount = st.number_input("주문금액 (전체 금액)", min_value=0, step=1, value=max(0, int(cj.get('주문금액', 0) * 1000000)), key=f"edit_cj_amount_{unique_key}")
                             cj_activity = st.text_area("마케팅활동", value=cj.get('마케팅활동', ''), height=40, key=f"edit_cj_activity_{unique_key}")
                             
                             st.write("---")
@@ -1305,11 +1305,11 @@ def dashboard():
                             live = data.get("AI라이브", {})
                             col1, col2, col3 = st.columns(3)
                             with col1:
-                                live_count = st.number_input("방송횟수", min_value=0, step=1, value=live.get('방송횟수', 0), key=f"edit_live_count_{unique_key}")
+                                live_count = st.number_input("방송횟수", min_value=0, step=1, value=max(0, live.get('방송횟수', 0)), key=f"edit_live_count_{unique_key}")
                             with col2:
-                                live_sale = st.number_input("방송매출 (전체 금액)", min_value=0, step=1, value=int(live.get('방송매출', 0) * 1000000), key=f"edit_live_sale_{unique_key}")
+                                live_sale = st.number_input("방송매출 (전체 금액)", min_value=0, step=1, value=max(0, int(live.get('방송매출', 0) * 1000000)), key=f"edit_live_sale_{unique_key}")
                             with col3:
-                                live_cost = st.number_input("소요비용 (전체 금액)", min_value=0, step=1, value=int(live.get('소요비용', 0) * 1000000), key=f"edit_live_cost_{unique_key}")
+                                live_cost = st.number_input("소요비용 (전체 금액)", min_value=0, step=1, value=max(0, int(live.get('소요비용', 0) * 1000000)), key=f"edit_live_cost_{unique_key}")
                             live_activity = st.text_area("마케팅활동", value=live.get('마케팅활동', ''), height=40, key=f"edit_live_activity_{unique_key}")
                             
                             st.write("---")
