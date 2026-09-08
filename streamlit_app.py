@@ -1573,54 +1573,6 @@ def dashboard():
                     st.write("")
         else:
             st.info(f"등록된 데이터가 없습니다")
-                                label_visibility="collapsed"
-                            )
-                        
-                        col1, col2 = st.columns(2)
-                        
-                        with col1:
-                            st.write("**🎥 AI 라이브**")
-                            live_feedback = st.text_area(
-                                "피드백",
-                                value=existing_feedback.get("AI라이브", ""),
-                                height=80,
-                                key=f"live_fb_{week_key}",
-                                label_visibility="collapsed"
-                            )
-                        
-                        with col2:
-                            st.write("**🎯 당주 주요활동**")
-                            activity_feedback = st.text_area(
-                                "피드백",
-                                value=existing_feedback.get("당주주요활동", ""),
-                                height=80,
-                                key=f"activity_fb_{week_key}",
-                                label_visibility="collapsed"
-                            )
-                        
-                        st.write("---")
-                        
-                        if st.form_submit_button("💾 피드백 저장", use_container_width=True):
-                            # 피드백 데이터 저장
-                            feedback_data[week_key] = {
-                                "거래선": selected_agency,
-                                "주차": week,
-                                "월": month,
-                                "네이버스마트스토어": ss_feedback,
-                                "어필리에이트": af_feedback,
-                                "AI라이브": live_feedback,
-                                "당주주요활동": activity_feedback,
-                                "저장일시": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                            }
-                            
-                            # feedback.json에 저장
-                            with open("feedback.json", "w", encoding='utf-8') as f:
-                                json.dump(feedback_data, f, ensure_ascii=False, indent=2)
-                            
-                            st.success("✅ 피드백이 저장되었습니다!")
-                            st.rerun()
-        else:
-            st.info(f"등록된 데이터가 없습니다")
 
 # 메인
 if st.session_state.user_name is None:
