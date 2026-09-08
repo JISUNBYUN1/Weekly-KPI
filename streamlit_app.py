@@ -586,9 +586,10 @@ def dashboard():
         live_commerce_data = sales_data.get('live_commerce', {})
         
         if live_commerce_data:
-            # 드롭다운: 월 선택
+            # 드롭다운: 월 선택 (역순)
             all_months = ["1월", "2월", "3월", "4월", "5월", "6월", "7월", "8월", "9월", "10월", "11월", "12월"]
-            selected_month = st.selectbox("월 선택", all_months, key="live_month_select")
+            all_months_reversed = list(reversed(all_months))
+            selected_month = st.selectbox("월 선택", all_months_reversed, key="live_month_select")
             
             # 월별 주차 매핑 (weeks_2026 로드)
             try:
@@ -734,9 +735,10 @@ def dashboard():
         affiliate_data = sales_data.get('affiliate', {})
         
         if affiliate_data:
-            # 드롭다운: 월 선택
+            # 드롭다운: 월 선택 (역순)
             all_months = ["1월", "2월", "3월", "4월", "5월", "6월", "7월", "8월", "9월", "10월", "11월", "12월"]
-            selected_month = st.selectbox("월 선택", all_months, key="affiliate_month_select")
+            all_months_reversed = list(reversed(all_months))
+            selected_month = st.selectbox("월 선택", all_months_reversed, key="affiliate_month_select")
             
             # 월별 주차 매핑 (weeks_2026 로드)
             try:
@@ -857,9 +859,10 @@ def dashboard():
             input_agency = st.selectbox("거래선 선택", AGENCIES, key="input_agency")
         
         with col2:
-            # 월 선택 (1-12월 동적)
+            # 월 선택 (1-12월 동적, 역순)
             all_months = ["1월", "2월", "3월", "4월", "5월", "6월", "7월", "8월", "9월", "10월", "11월", "12월"]
-            input_month = st.selectbox("월 선택", all_months, key="input_month")
+            all_months_reversed = list(reversed(all_months))
+            input_month = st.selectbox("월 선택", all_months_reversed, key="input_month")
         
         with col3:
             # 선택된 월의 주차 리스트
@@ -1237,107 +1240,219 @@ def dashboard():
                 week_display = f"**{week_clean}** ({month})"
                 unique_key = f"{selected_agency}_{week_clean}_{month}_{idx}"
                 
-                with st.expander(week_display, expanded=False):
-                    # 1. 네이버 스마트 스토어
-                    st.subheader("1️⃣ 네이버 스마트 스토어")
-                    ss = data.get("네이버스마트스토어", {})
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        st.metric("신규 관심고객", f"{ss.get('신규관심고객수', 0):,}")
-                    with col2:
-                        st.metric("신규구매 구매자", f"{ss.get('신규구매구매자수', 0):,}")
-                    with col3:
-                        st.metric("재구매 구매자", f"{ss.get('재구매구매자수', 0):,}")
+                # 수정 모드 확인
+                is_edit_mode = st.session_state.get("edit_mode", False) and st.session_state.get("edit_key", "") == unique_key
+                
+                with st.expander(week_display, expanded=is_edit_mode):
+                    if is_edit_mode:
+                        # ===== 수정 FORM =====
+                        st.subheader("✏️ 데이터 수정")
+                        
+                        with st.form(f"edit_form_{unique_key}"):
+                            # 1. 네이버 스마트 스토어
+                            st.write("**1️⃣ 네이버 스마트 스토어**")
+                            ss = data.get("네이버스마트스토어", {})
+                            col1, col2, col3 = st.columns(3)
+                            with col1:
+                                ss_interest = st.number_input("신규 관심고객수", min_value=0, step=1, value=ss.get('신규관심고객수', 0), key=f"edit_ss_interest_{unique_key}")
+                            with col2:
+                                ss_new = st.number_input("신규구매 구매자수", min_value=0, step=1, value=ss.get('신규구매구매자수', 0), key=f"edit_ss_new_{unique_key}")
+                            with col3:
+                                ss_repurchase = st.number_input("재구매 구매자수", min_value=0, step=1, value=ss.get('재구매구매자수', 0), key=f"edit_ss_repurchase_{unique_key}")
+                            ss_activity = st.text_area("마케팅활동", value=ss.get('마케팅활동', ''), height=50, key=f"edit_ss_activity_{unique_key}")
+                            
+                            st.write("---")
+                            
+                            # 2. 어필리에이트
+                            st.write("**2️⃣ 어필리에이트**")
+                            
+                            sc = data.get("쇼핑커넥트", {})
+                            st.write("🔹 **쇼핑커넥트**")
+                            col1, col2, col3 = st.columns(3)
+                            with col1:
+                                sc_creator = st.number_input("크리에이터 운영 수", min_value=0, step=1, value=sc.get('크리에이터운영수', 0), key=f"edit_sc_creator_{unique_key}")
+                            with col2:
+                                sc_model = st.number_input("운영 모델 수", min_value=0, step=1, value=sc.get('운영모델수', 0), key=f"edit_sc_model_{unique_key}")
+                            with col3:
+                                sc_visits = st.number_input("유입수", min_value=0, step=1, value=sc.get('유입수', 0), key=f"edit_sc_visits_{unique_key}")
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                sc_orders = st.number_input("상품주문건수", min_value=0, step=1, value=sc.get('상품주문건수', 0), key=f"edit_sc_orders_{unique_key}")
+                            with col2:
+                                sc_amount = st.number_input("주문금액 (전체 금액)", min_value=0, step=1, value=int(sc.get('주문금액', 0) * 1000000), key=f"edit_sc_amount_{unique_key}")
+                            sc_activity = st.text_area("마케팅활동", value=sc.get('마케팅활동', ''), height=40, key=f"edit_sc_activity_{unique_key}")
+                            
+                            st.write("")
+                            
+                            cj = data.get("공동구매", {})
+                            st.write("🔹 **공동구매**")
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                cj_creator = st.number_input("크리에이터 운영 수", min_value=0, step=1, value=cj.get('크리에이터운영수', 0), key=f"edit_cj_creator_{unique_key}")
+                            with col2:
+                                cj_model = st.number_input("운영 모델 수", min_value=0, step=1, value=cj.get('운영모델수', 0), key=f"edit_cj_model_{unique_key}")
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                cj_orders = st.number_input("상품주문건수", min_value=0, step=1, value=cj.get('상품주문건수', 0), key=f"edit_cj_orders_{unique_key}")
+                            with col2:
+                                cj_amount = st.number_input("주문금액 (전체 금액)", min_value=0, step=1, value=int(cj.get('주문금액', 0) * 1000000), key=f"edit_cj_amount_{unique_key}")
+                            cj_activity = st.text_area("마케팅활동", value=cj.get('마케팅활동', ''), height=40, key=f"edit_cj_activity_{unique_key}")
+                            
+                            st.write("---")
+                            
+                            # 3. AI 라이브
+                            st.write("**🎥 3️⃣ AI 라이브**")
+                            live = data.get("AI라이브", {})
+                            col1, col2, col3 = st.columns(3)
+                            with col1:
+                                live_count = st.number_input("방송횟수", min_value=0, step=1, value=live.get('방송횟수', 0), key=f"edit_live_count_{unique_key}")
+                            with col2:
+                                live_sale = st.number_input("방송매출 (전체 금액)", min_value=0, step=1, value=int(live.get('방송매출', 0) * 1000000), key=f"edit_live_sale_{unique_key}")
+                            with col3:
+                                live_cost = st.number_input("소요비용 (전체 금액)", min_value=0, step=1, value=int(live.get('소요비용', 0) * 1000000), key=f"edit_live_cost_{unique_key}")
+                            live_activity = st.text_area("마케팅활동", value=live.get('마케팅활동', ''), height=40, key=f"edit_live_activity_{unique_key}")
+                            
+                            st.write("---")
+                            
+                            if st.form_submit_button("💾 저장", use_container_width=True):
+                                # 데이터 업데이트
+                                data["네이버스마트스토어"] = {
+                                    "신규관심고객수": ss_interest,
+                                    "신규구매구매자수": ss_new,
+                                    "재구매구매자수": ss_repurchase,
+                                    "마케팅활동": ss_activity
+                                }
+                                data["쇼핑커넥트"] = {
+                                    "크리에이터운영수": sc_creator,
+                                    "운영모델수": sc_model,
+                                    "유입수": sc_visits,
+                                    "상품주문건수": sc_orders,
+                                    "주문금액": round(sc_amount / 1000000, 2),
+                                    "마케팅활동": sc_activity
+                                }
+                                data["공동구매"] = {
+                                    "크리에이터운영수": cj_creator,
+                                    "운영모델수": cj_model,
+                                    "상품주문건수": cj_orders,
+                                    "주문금액": round(cj_amount / 1000000, 2),
+                                    "마케팅활동": cj_activity
+                                }
+                                data["AI라이브"] = {
+                                    "방송횟수": live_count,
+                                    "방송매출": round(live_sale / 1000000, 2),
+                                    "소요비용": round(live_cost / 1000000, 4),
+                                    "마케팅활동": live_activity
+                                }
+                                
+                                # weekly_data.json 업데이트
+                                with open("weekly_data.json", "w", encoding='utf-8') as f:
+                                    json.dump(weekly_data_list, f, ensure_ascii=False, indent=2)
+                                
+                                st.session_state.edit_mode = False
+                                st.success(f"✅ {selected_agency} - {week_clean} ({month}) 데이터 저장됨!")
+                                st.rerun()
                     
-                    if ss.get("마케팅활동"):
-                        st.info(f"📌 **마케팅활동**: {ss.get('마케팅활동')}")
-                    
-                    st.divider()
-                    
-                    # 2. 어필리에이트
-                    st.subheader("2️⃣ 어필리에이트")
-                    
-                    sc = data.get("쇼핑커넥트", {})
-                    col_sc1, col_sc2 = st.columns(2)
-                    with col_sc1:
-                        st.write("🔹 **쇼핑커넥트**")
-                        col1, col2 = st.columns(2)
+                    else:
+                        # ===== 조회 모드 =====
+                        # 1. 네이버 스마트 스토어
+                        st.subheader("1️⃣ 네이버 스마트 스토어")
+                        ss = data.get("네이버스마트스토어", {})
+                        col1, col2, col3 = st.columns(3)
                         with col1:
-                            st.metric("크리에이터", f"{sc.get('크리에이터운영수', 0)}")
-                            st.metric("모델", f"{sc.get('운영모델수', 0)}")
+                            st.metric("신규 관심고객", f"{ss.get('신규관심고객수', 0):,}")
                         with col2:
-                            st.metric("유입수", f"{sc.get('유입수', 0):,}")
-                            st.metric("주문", f"{sc.get('상품주문건수', 0)}")
-                        st.metric("금액(백만)", f"{sc.get('주문금액', 0):.1f}")
-                        if sc.get("마케팅활동"):
-                            st.caption(f"📌 {sc.get('마케팅활동')}")
-                    
-                    cj = data.get("공동구매", {})
-                    with col_sc2:
-                        st.write("🔹 **공동구매**")
-                        col1, col2 = st.columns(2)
+                            st.metric("신규구매 구매자", f"{ss.get('신규구매구매자수', 0):,}")
+                        with col3:
+                            st.metric("재구매 구매자", f"{ss.get('재구매구매자수', 0):,}")
+                        
+                        if ss.get("마케팅활동"):
+                            st.info(f"📌 **마케팅활동**: {ss.get('마케팅활동')}")
+                        
+                        st.write("")
+                        
+                        # 2. 어필리에이트
+                        st.subheader("2️⃣ 어필리에이트")
+                        
+                        sc = data.get("쇼핑커넥트", {})
+                        col_sc1, col_sc2 = st.columns(2)
+                        with col_sc1:
+                            st.write("🔹 **쇼핑커넥트**")
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                st.metric("크리에이터", f"{sc.get('크리에이터운영수', 0)}")
+                                st.metric("모델", f"{sc.get('운영모델수', 0)}")
+                            with col2:
+                                st.metric("유입수", f"{sc.get('유입수', 0):,}")
+                                st.metric("주문", f"{sc.get('상품주문건수', 0)}")
+                            st.metric("금액", f"{sc.get('주문금액', 0):.2f}백만")
+                            if sc.get("마케팅활동"):
+                                st.caption(f"📌 {sc.get('마케팅활동')}")
+                        
+                        cj = data.get("공동구매", {})
+                        with col_sc2:
+                            st.write("🔹 **공동구매**")
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                st.metric("크리에이터", f"{cj.get('크리에이터운영수', 0)}")
+                                st.metric("모델", f"{cj.get('운영모델수', 0)}")
+                            with col2:
+                                st.metric("주문", f"{cj.get('상품주문건수', 0)}")
+                            st.metric("금액", f"{cj.get('주문금액', 0):.2f}백만")
+                            if cj.get("마케팅활동"):
+                                st.caption(f"📌 {cj.get('마케팅활동')}")
+                        
+                        st.write("")
+                        
+                        # 3. AI 라이브
+                        st.subheader("🎥 3️⃣ AI 라이브")
+                        live = data.get("AI라이브", {})
+                        col1, col2, col3 = st.columns(3)
                         with col1:
-                            st.metric("크리에이터", f"{cj.get('크리에이터운영수', 0)}")
-                            st.metric("모델", f"{cj.get('운영모델수', 0)}")
+                            st.metric("방송횟수", f"{live.get('방송횟수', 0)}")
                         with col2:
-                            st.metric("주문", f"{cj.get('상품주문건수', 0)}")
-                        st.metric("금액(백만)", f"{cj.get('주문금액', 0):.1f}")
-                        if cj.get("마케팅활동"):
-                            st.caption(f"📌 {cj.get('마케팅활동')}")
-                    
-                    st.divider()
-                    
-                    # 3. AI 라이브
-                    st.subheader("🎥 3️⃣ AI 라이브")
-                    live = data.get("AI라이브", {})
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        st.metric("방송횟수", f"{live.get('방송횟수', 0)}")
-                    with col2:
-                        st.metric("방송매출(백만)", f"{live.get('방송매출', 0):.1f}")
-                    with col3:
-                        st.metric("소요비용(백만)", f"{live.get('소요비용', 0):.2f}")
-                    
-                    if live.get("마케팅활동"):
-                        st.info(f"📌 **마케팅활동**: {live.get('마케팅활동')}")
-                    
-                    st.divider()
-                    
-                    # 4. 당주 주요활동
-                    st.subheader("🎯 당주 주요활동")
-                    activity = data.get("당주주요활동", {})
-                    
-                    activity_items = [
-                        ("📌 AI 라이브 효율 증대", "AI라이브효율증대"),
-                        ("📌 어필리에이트 내재화", "어필리에이트내재화"),
-                        ("📌 구독활성화", "구독활성화"),
-                        ("📌 기타 신규 프로젝트", "기타신규프로젝트")
-                    ]
-                    
-                    for label, key in activity_items:
-                        if activity.get(key):
-                            with st.expander(label, key=f"act_{key}_{unique_key}"):
-                                st.write(activity.get(key))
-                            st.write("")  # spacing
-                    
-                    st.divider()
-                    st.subheader("⚙️ 데이터 관리")
-                    
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        if st.button("✏️ 수정", key=f"edit_{unique_key}", use_container_width=True):
-                            st.session_state.edit_data = data
-                            st.session_state.edit_index = weekly_data_list.index(data)
-                            st.session_state.edit_mode = True
-                    
-                    with col2:
-                        if st.button("🗑️ 삭제", key=f"delete_{unique_key}", use_container_width=True):
-                            weekly_data_list.remove(data)
-                            with open("weekly_data.json", "w", encoding='utf-8') as f:
-                                json.dump(weekly_data_list, f, ensure_ascii=False, indent=2)
-                            st.success(f"✅ {selected_agency} - {week_clean} ({month}) 데이터 삭제됨!")
-                            st.rerun()
+                            st.metric("방송매출", f"{live.get('방송매출', 0):.2f}백만")
+                        with col3:
+                            st.metric("소요비용", f"{live.get('소요비용', 0):.4f}백만")
+                        
+                        if live.get("마케팅활동"):
+                            st.info(f"📌 **마케팅활동**: {live.get('마케팅활동')}")
+                        
+                        st.write("")
+                        
+                        # 4. 당주 주요활동
+                        st.subheader("🎯 당주 주요활동")
+                        activity = data.get("당주주요활동", {})
+                        
+                        activity_items = [
+                            ("📌 AI 라이브 효율 증대", "AI라이브효율증대"),
+                            ("📌 어필리에이트 내재화", "어필리에이트내재화"),
+                            ("📌 구독활성화", "구독활성화"),
+                            ("📌 기타 신규 프로젝트", "기타신규프로젝트")
+                        ]
+                        
+                        for label, key in activity_items:
+                            if activity.get(key):
+                                with st.expander(label, key=f"act_{key}_{unique_key}"):
+                                    st.write(activity.get(key))
+                        
+                        st.write("")
+                        st.subheader("⚙️ 데이터 관리")
+                        
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            if st.button("✏️ 수정", key=f"edit_{unique_key}", use_container_width=True):
+                                st.session_state.edit_mode = True
+                                st.session_state.edit_key = unique_key
+                                st.rerun()
+                        
+                        with col2:
+                            if st.button("🗑️ 삭제", key=f"delete_{unique_key}", use_container_width=True):
+                                weekly_data_list.remove(data)
+                                with open("weekly_data.json", "w", encoding='utf-8') as f:
+                                    json.dump(weekly_data_list, f, ensure_ascii=False, indent=2)
+                                st.success(f"✅ {selected_agency} - {week_clean} ({month}) 데이터 삭제됨!")
+                                st.rerun()
         else:
             st.info(f"등록된 데이터가 없습니다")
     
