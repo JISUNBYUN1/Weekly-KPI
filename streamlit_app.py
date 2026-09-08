@@ -582,116 +582,121 @@ def dashboard():
     # 라이브커머스
     elif current_page == "라이브":
         st.subheader("📹 라이브커머스")
-        st.caption("💡 8월부터 주차별 데이터만 제공 (현재 W36A 취합 전)")
         
         live_commerce_data = sales_data.get('live_commerce', {})
         
         if live_commerce_data:
-            tab1, tab2 = st.tabs(["📅 월별", "📆 주차별"])
+            # 드롭다운: 월 선택
+            all_months = ["1월", "2월", "3월", "4월", "5월", "6월", "7월", "8월", "9월", "10월", "11월", "12월"]
+            selected_month = st.selectbox("월 선택", all_months, key="live_month_select")
             
-            with tab1:
-                st.write("#### 월별 실적 (1월~7월)")
+            # 월별 주차 매핑 (weeks_2026 로드)
+            try:
+                with open('weeks_2026.json', 'r', encoding='utf-8') as f:
+                    weeks_2026 = json.load(f)
+            except:
+                weeks_2026 = {}
+            
+            def get_weeks_for_live(month):
+                """해당 월의 주차 리스트 반환"""
+                month_num = int(month.replace('월', ''))
+                weeks_list = ["계"]  # 첫 번째는 "계" (전체)
                 
-                # 1~7월 월별 데이터 직접 접근
-                if '월별' in live_commerce_data:
-                    months_data = live_commerce_data['월별']
-                    months_list = ['1월', '2월', '3월', '4월', '5월', '6월', '7월']
-                    available_months = [m for m in months_list if m in months_data and isinstance(months_data[m], dict)]
+                for week, info in weeks_2026.items():
+                    month_info = info['month']
                     
-                    if available_months:
-                        available_months = sorted(available_months, reverse=True)
-                        selected_month = st.selectbox("월 선택", available_months, key="live_month_select")
-                        
-                        if selected_month in months_data:
-                            month_data = months_data[selected_month]
-                            
-                            # 소요비용 데이터 로드 (거래선별 월평균)
-                            live_cost_data = {}
-                            try:
-                                with open('live_commerce_cost_data.json', 'r', encoding='utf-8') as f:
-                                    live_cost_data = json.load(f)
-                                    # 연간 누적을 월평균으로 변환
-                                    for agency in live_cost_data:
-                                        live_cost_data[agency]['소요비용'] = live_cost_data[agency].get('소요비용', 0) / 12
-                            except:
-                                live_cost_data = {}
-                            
-                            # 데이터 구성 (소요비용 병합)
-                            display_data = {}
-                            if '전체' in month_data:
-                                display_data['전체'] = month_data['전체'].copy()
-                                # 전체 소요비용 계산
-                                total_cost = sum([data.get('소요비용', 0) for data in live_cost_data.values()])
-                                display_data['전체']['소요비용'] = total_cost
-                            
-                            for agency in AGENCIES:
-                                if agency in month_data:
-                                    display_data[agency] = month_data[agency].copy()
-                                    # 해당 거래선의 소요비용 추가
-                                    if agency in live_cost_data:
-                                        display_data[agency]['소요비용'] = live_cost_data[agency]['소요비용']
-                                    else:
-                                        display_data[agency]['소요비용'] = 0
-                            
-                            create_live_commerce_table(display_data, f"📊 {selected_month} 라이브커머스 실적")
-                    else:
-                        st.warning("1월~7월 월별 데이터가 없습니다")
+                    if isinstance(month_info, int):
+                        if month_info == month_num:
+                            weeks_list.append(week)
+                    elif isinstance(month_info, list):
+                        if month_num in month_info:
+                            if month_num == month_info[0]:
+                                weeks_list.append(f"{week}A")
+                            else:
+                                weeks_list.append(f"{week}B")
+                
+                def sort_key(w):
+                    if w == "계":
+                        return -1
+                    num = int(''.join(filter(str.isdigit, w)))
+                    return num
+                
+                return sorted(weeks_list, key=sort_key)
+            
+            # 드롭다운: 주차 선택
+            available_weeks = get_weeks_for_live(selected_month)
+            if available_weeks:
+                selected_week = st.selectbox("주차 선택", available_weeks, key="live_week_select")
+            else:
+                st.warning(f"{selected_month}에 주차 데이터가 없습니다")
+                selected_week = None
+            
+            st.write("---")
+            
+            if selected_week:
+                # 데이터 표시
+                if selected_week == "계":
+                    st.write(f"**📊 {selected_month} 라이브커머스 실적 (월 전체)**")
                 else:
-                    st.warning("월별 데이터가 없습니다")
-            
-            with tab2:
-                st.write("#### 주차별 실적 (8월 데이터)")
+                    st.write(f"**📊 {selected_month} {selected_week} 라이브커머스 실적**")
                 
-                # 8월 주차별 데이터만 표시
-                if '8월' in live_commerce_data and '주차별' in live_commerce_data['8월']:
-                    weeks_data = live_commerce_data['8월']['주차별']
-                    weeks_list = list(weeks_data.keys())
-                    
-                    # 주차명 매핑 ("31B주" → "W31B")
-                    week_mapping = {
-                        "31B주": "W31B",
-                        "32주": "W32",
-                        "33주": "W33",
-                        "34주": "W34",
-                        "35주": "W35",
-                        "36A주": "W36A"
-                    }
-                    
-                    # 보기 이름 생성 (주차명 + 날짜)
-                    try:
-                        with open('weeks_2026.json', 'r', encoding='utf-8') as f:
-                            weeks_2026 = json.load(f)
-                    except:
-                        weeks_2026 = {}
-                    
-                    week_display_names = []
-                    for week_key in weeks_list:
-                        mapped_week = week_mapping.get(week_key, week_key)
-                        if mapped_week in weeks_2026:
-                            date_range = f"{weeks_2026[mapped_week]['start']} ~ {weeks_2026[mapped_week]['end']}"
-                            display_name = f"{mapped_week} ({date_range})"
-                        else:
-                            display_name = mapped_week
-                        week_display_names.append((week_key, display_name))
-                    
-                    if weeks_list:
-                        selected_display = st.selectbox(
-                            "주차 선택",
-                            [name for _, name in week_display_names],
-                            key="live_week_select"
-                        )
+                # 월별 데이터
+                if selected_month in live_commerce_data and selected_week == "계":
+                    if '월별' in live_commerce_data and selected_month in live_commerce_data['월별']:
+                        month_data = live_commerce_data['월별'][selected_month]
                         
-                        # 선택한 주차의 원본 키 찾기
-                        selected_week = None
-                        for orig_key, display_name in week_display_names:
-                            if display_name == selected_display:
-                                selected_week = orig_key
-                                break
+                        # 소요비용 데이터 로드
+                        live_cost_data = {}
+                        try:
+                            with open('live_commerce_cost_data.json', 'r', encoding='utf-8') as f:
+                                live_cost_data = json.load(f)
+                                for agency in live_cost_data:
+                                    live_cost_data[agency]['소요비용'] = live_cost_data[agency].get('소요비용', 0) / 12
+                        except:
+                            live_cost_data = {}
                         
-                        if selected_week and selected_week in weeks_data:
-                            week_data = weeks_data[selected_week]
+                        # 데이터 구성
+                        display_data = {}
+                        if '전체' in month_data:
+                            display_data['전체'] = month_data['전체'].copy()
+                            total_cost = sum([data.get('소요비용', 0) for data in live_cost_data.values()])
+                            display_data['전체']['소요비용'] = total_cost
+                        
+                        for agency in AGENCIES:
+                            if agency in month_data:
+                                display_data[agency] = month_data[agency].copy()
+                                if agency in live_cost_data:
+                                    display_data[agency]['소요비용'] = live_cost_data[agency]['소요비용']
+                                else:
+                                    display_data[agency]['소요비용'] = 0
+                        
+                        create_live_commerce_table(display_data, f"📊 {selected_month} 라이브커머스 실적")
+                    else:
+                        st.info("해당 월의 데이터가 없습니다")
+                
+                # 주차별 데이터
+                else:
+                    week_base = selected_week.replace('A', '').replace('B', '')
+                    
+                    # 8월 데이터 확인
+                    if selected_month == "8월" and '8월' in live_commerce_data and '주차별' in live_commerce_data['8월']:
+                        weeks_data = live_commerce_data['8월']['주차별']
+                        
+                        # 주차명 매핑
+                        week_mapping = {
+                            "31B주": "W31B", "32주": "W32", "33주": "W33",
+                            "34주": "W34", "35주": "W35", "36A주": "W36A"
+                        }
+                        
+                        # 역 매핑 (W35 → 35주)
+                        reverse_mapping = {v: k for k, v in week_mapping.items()}
+                        
+                        selected_week_key = reverse_mapping.get(selected_week, selected_week)
+                        
+                        if selected_week_key in weeks_data:
+                            week_data = weeks_data[selected_week_key]
                             
-                            # 소요비용 데이터 로드 (거래선별 연간 누적)
+                            # 소요비용 데이터 로드
                             live_cost_data = {}
                             try:
                                 with open('live_commerce_cost_data.json', 'r', encoding='utf-8') as f:
@@ -699,28 +704,26 @@ def dashboard():
                             except:
                                 live_cost_data = {}
                             
-                            # 데이터 구성 (소요비용 병합)
+                            # 데이터 구성
                             display_data = {}
                             if '전체' in week_data:
                                 display_data['전체'] = week_data['전체'].copy()
-                                # 전체 소요비용 계산
                                 total_cost = sum([data.get('소요비용', 0) for data in live_cost_data.values()])
                                 display_data['전체']['소요비용'] = total_cost
                             
                             for agency in AGENCIES:
                                 if agency in week_data:
                                     display_data[agency] = week_data[agency].copy()
-                                    # 해당 거래선의 소요비용 추가
                                     if agency in live_cost_data:
                                         display_data[agency]['소요비용'] = live_cost_data[agency]['소요비용']
                                     else:
                                         display_data[agency]['소요비용'] = 0
                             
                             create_live_commerce_table(display_data, f"📊 {selected_week} 라이브커머스 실적")
+                        else:
+                            st.info("해당 주차의 데이터가 없습니다")
                     else:
-                        st.warning("주차별 데이터가 없습니다")
-                else:
-                    st.warning("8월 주차별 데이터가 없습니다")
+                        st.info("해당 월/주차의 데이터가 없습니다")
         else:
             st.warning("라이브커머스 데이터가 없습니다")
     
@@ -731,81 +734,76 @@ def dashboard():
         affiliate_data = sales_data.get('affiliate', {})
         
         if affiliate_data:
-            tab1, tab2 = st.tabs(["📅 월별", "📆 주차별"])
+            # 드롭다운: 월 선택
+            all_months = ["1월", "2월", "3월", "4월", "5월", "6월", "7월", "8월", "9월", "10월", "11월", "12월"]
+            selected_month = st.selectbox("월 선택", all_months, key="affiliate_month_select")
             
-            with tab1:
-                st.write("#### 월별 실적")
-                months = affiliate_data.get('월별', {})
-                if months:
-                    months_list = sorted(list(months.keys()), reverse=True)
-                    selected_month = st.selectbox("월 선택", months_list, key="month_select")
+            # 월별 주차 매핑 (weeks_2026 로드)
+            try:
+                with open('weeks_2026.json', 'r', encoding='utf-8') as f:
+                    weeks_2026 = json.load(f)
+            except:
+                weeks_2026 = {}
+            
+            def get_weeks_for_affiliate(month):
+                """해당 월의 주차 리스트 반환"""
+                month_num = int(month.replace('월', ''))
+                weeks_list = ["계"]  # 첫 번째는 "계" (전체)
+                
+                for week, info in weeks_2026.items():
+                    month_info = info['month']
                     
-                    if selected_month in months:
-                        display_data = months[selected_month].copy()
-                        
-                        # 8월인 경우 주차별 합계로 표시
-                        if selected_month == "8월":
-                            weeks_data = affiliate_data.get('주차별', {})
-                            if weeks_data:
-                                # 거래선별 합계 계산
-                                sum_data = {}
-                                for agency in AGENCIES:
-                                    agency_sum = {
-                                        "어필리에이트": {"크리에이터": 0, "운영모델": 0, "주문건수": 0, "주문금액": 0},
-                                        "쇼핑커넥트": {"크리에이터": 0, "운영모델": 0, "유입수": 0, "상품주문": 0, "주문금액": 0},
-                                        "공동구매": {"크리에이터": 0, "운영모델": 0, "상품주문": 0, "주문금액": 0}
-                                    }
-                                    
-                                    for week in weeks_data.values():
-                                        if agency in week:
-                                            for channel in ["어필리에이트", "쇼핑커넥트", "공동구매"]:
-                                                for key, val in week[agency][channel].items():
-                                                    if key != "전환율" and isinstance(val, (int, float)):
-                                                        agency_sum[channel][key] += val
-                                    
-                                    # 쇼핑커넥트 전환율 계산
-                                    if agency_sum["쇼핑커넥트"]["유입수"] > 0:
-                                        agency_sum["쇼핑커넥트"]["전환율"] = (agency_sum["쇼핑커넥트"]["상품주문"] / agency_sum["쇼핑커넥트"]["유입수"]) * 100
-                                    else:
-                                        agency_sum["쇼핑커넥트"]["전환율"] = 0
-                                    
-                                    sum_data[agency] = agency_sum
-                                
-                                # 전체 합계
-                                total_sum = {
-                                    "어필리에이트": {"크리에이터": 0, "운영모델": 0, "주문건수": 0, "주문금액": 0},
-                                    "쇼핑커넥트": {"크리에이터": 0, "운영모델": 0, "유입수": 0, "상품주문": 0, "주문금액": 0},
-                                    "공동구매": {"크리에이터": 0, "운영모델": 0, "상품주문": 0, "주문금액": 0}
-                                }
-                                
-                                for agency_data in sum_data.values():
-                                    for channel in ["어필리에이트", "쇼핑커넥트", "공동구매"]:
-                                        for key, val in agency_data[channel].items():
-                                            if key != "전환율" and isinstance(val, (int, float)):
-                                                total_sum[channel][key] += val
-                                
-                                if total_sum["쇼핑커넥트"]["유입수"] > 0:
-                                    total_sum["쇼핑커넥트"]["전환율"] = (total_sum["쇼핑커넥트"]["상품주문"] / total_sum["쇼핑커넥트"]["유입수"]) * 100
-                                else:
-                                    total_sum["쇼핑커넥트"]["전환율"] = 0
-                                
-                                sum_data["계"] = total_sum
-                                display_data = sum_data
-                        
-                        create_affiliate_table(display_data, f"📊 {selected_month} 어필리에이트 실적")
-                else:
-                    st.warning("월별 데이터가 없습니다")
+                    if isinstance(month_info, int):
+                        if month_info == month_num:
+                            weeks_list.append(week)
+                    elif isinstance(month_info, list):
+                        if month_num in month_info:
+                            if month_num == month_info[0]:
+                                weeks_list.append(f"{week}A")
+                            else:
+                                weeks_list.append(f"{week}B")
+                
+                def sort_key(w):
+                    if w == "계":
+                        return -1
+                    num = int(''.join(filter(str.isdigit, w)))
+                    return num
+                
+                return sorted(weeks_list, key=sort_key)
             
-            with tab2:
-                st.write("#### 주차별 실적")
+            # 드롭다운: 주차 선택
+            available_weeks = get_weeks_for_affiliate(selected_month)
+            if available_weeks:
+                selected_week = st.selectbox("주차 선택", available_weeks, key="affiliate_week_select")
+            else:
+                st.warning(f"{selected_month}에 주차 데이터가 없습니다")
+                selected_week = None
+            
+            st.write("---")
+            
+            if selected_week:
+                # 데이터 표시
+                st.write(f"**📊 {selected_month} {selected_week} 어필리에이트 실적**")
+                
+                # 월별 데이터
+                months = affiliate_data.get('월별', {})
+                if selected_month in months and selected_week == "계":
+                    create_affiliate_table(months[selected_month], f"📊 {selected_month} 어필리에이트 실적")
+                
+                # 주차별 데이터
                 weeks = affiliate_data.get('주차별', {})
-                if weeks:
-                    weeks_list = sorted(list(weeks.keys()), reverse=True)
-                    selected_week = st.selectbox("주차 선택", weeks_list, key="week_select")
-                    if selected_week in weeks:
-                        create_affiliate_table(weeks[selected_week], f"📊 {selected_week} 어필리에이트 실적")
+                
+                # W35A, W35B 등으로 저장된 데이터 찾기
+                week_base = selected_week.replace('A', '').replace('B', '')
+                if selected_week.endswith('A') or selected_week.endswith('B'):
+                    week_key = selected_week
                 else:
-                    st.warning("주차별 데이터가 없습니다")
+                    week_key = selected_week
+                
+                if week_key in weeks:
+                    create_affiliate_table(weeks[week_key], f"📊 {selected_week} 어필리에이트 실적")
+                elif selected_week != "계":
+                    st.info("해당 주차의 데이터가 없습니다")
         else:
             st.warning("어필리에이트 데이터가 없습니다")
     
@@ -942,11 +940,10 @@ def dashboard():
             st.write("---")
             st.subheader("🎯 당주 주요활동")
             
-            activity_구독 = st.text_area("📌 구독", placeholder="구독 관련 활동을 작성해주세요", height=50, key="activity_구독_input")
-            activity_광고 = st.text_area("📌 광고운영", placeholder="광고운영 관련 활동을 작성해주세요", height=50, key="activity_광고_input")
-            activity_딜 = st.text_area("📌 딜판촉", placeholder="딜판촉 관련 활동을 작성해주세요", height=50, key="activity_딜_input")
-            activity_바이럴 = st.text_area("📌 바이럴/컨텐츠운영", placeholder="바이럴/컨텐츠운영 관련 활동을 작성해주세요", height=50, key="activity_바이럴_input")
-            activity_기타 = st.text_area("📌 기타", placeholder="기타 활동을 작성해주세요", height=50, key="activity_기타_input")
+            activity_AI라이브효율증대 = st.text_area("📌 AI 라이브 효율 증대", placeholder="AI 라이브 효율 증대 관련 활동을 작성해주세요", height=50, key="activity_AI라이브효율증대_input")
+            activity_어필리에이트내재화 = st.text_area("📌 어필리에이트 내재화", placeholder="어필리에이트 내재화 관련 활동을 작성해주세요", height=50, key="activity_어필리에이트내재화_input")
+            activity_구독활성화 = st.text_area("📌 구독활성화", placeholder="구독활성화 관련 활동을 작성해주세요", height=50, key="activity_구독활성화_input")
+            activity_기타신규프로젝트 = st.text_area("📌 기타 신규 프로젝트", placeholder="기타 신규 프로젝트를 작성해주세요", height=50, key="activity_기타신규프로젝트_input")
             
             st.write("---")
             
@@ -994,11 +991,10 @@ def dashboard():
                             "마케팅활동": live_activity
                         },
                         "당주주요활동": {
-                            "구독": activity_구독,
-                            "광고운영": activity_광고,
-                            "딜판촉": activity_딜,
-                            "바이럴컨텐츠운영": activity_바이럴,
-                            "기타": activity_기타
+                            "AI라이브효율증대": activity_AI라이브효율증대,
+                            "어필리에이트내재화": activity_어필리에이트내재화,
+                            "구독활성화": activity_구독활성화,
+                            "기타신규프로젝트": activity_기타신규프로젝트
                         }
                     }
                     
@@ -1218,81 +1214,78 @@ def dashboard():
         agency_data = [item for item in weekly_data_list if item.get("거래선") == selected_agency]
         
         if agency_data:
-            # 주차명 정렬 함수 (W35, W35A, W35B 모두 35로 인식)
+            # 주차명 정렬 함수 (숫자만 추출해서 정렬)
             def get_week_num(week_str):
-                # "W35" or "W35A" or "W35B" → 35
                 num_str = ''.join(c for c in week_str if c.isdigit())
                 return int(num_str) if num_str else 0
             
             # 최신 주차순으로 정렬
-            agency_data_sorted = sorted(agency_data, key=lambda x: get_week_num(x.get("주차", "W00")), reverse=True)
+            agency_data_sorted = sorted(agency_data, key=lambda x: (get_week_num(x.get("주차", "W00")), x.get("월", "")), reverse=True)
             
             st.write(f"**총 {len(agency_data_sorted)}개 주차 데이터**")
+            st.write("")
             
             # 순회용 인덱스
             for idx, data in enumerate(agency_data_sorted):
-                week = data.get("주차", "")
+                week_raw = data.get("주차", "")
                 month = data.get("월", "")
-                week_display = f"{week} ({month})"
-                unique_key = f"{selected_agency}_{week}_{idx}"  # 중복 방지
                 
-                with st.expander(week_display):
+                # 주차명 정리: 숫자만 추출 후 W + 숫자로 표시
+                week_num = ''.join(c for c in week_raw if c.isdigit())
+                week_clean = f"W{week_num}" if week_num else week_raw
+                
+                week_display = f"**{week_clean}** ({month})"
+                unique_key = f"{selected_agency}_{week_clean}_{month}_{idx}"
+                
+                with st.expander(week_display, expanded=False):
                     # 1. 네이버 스마트 스토어
                     st.subheader("1️⃣ 네이버 스마트 스토어")
                     ss = data.get("네이버스마트스토어", {})
                     col1, col2, col3 = st.columns(3)
                     with col1:
-                        st.metric("신규 관심고객수", f"{ss.get('신규관심고객수', 0):,}")
+                        st.metric("신규 관심고객", f"{ss.get('신규관심고객수', 0):,}")
                     with col2:
-                        st.metric("신규구매 구매자수", f"{ss.get('신규구매구매자수', 0):,}")
+                        st.metric("신규구매 구매자", f"{ss.get('신규구매구매자수', 0):,}")
                     with col3:
-                        st.metric("재구매 구매자수", f"{ss.get('재구매구매자수', 0):,}")
+                        st.metric("재구매 구매자", f"{ss.get('재구매구매자수', 0):,}")
                     
                     if ss.get("마케팅활동"):
-                        st.write(f"**마케팅활동**: {ss.get('마케팅활동')}")
+                        st.info(f"📌 **마케팅활동**: {ss.get('마케팅활동')}")
                     
-                    st.write("---")
+                    st.divider()
                     
                     # 2. 어필리에이트
                     st.subheader("2️⃣ 어필리에이트")
                     
                     sc = data.get("쇼핑커넥트", {})
-                    st.write("🔹 **쇼핑커넥트**")
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        st.metric("크리에이터 운영 수", f"{sc.get('크리에이터운영수', 0)}")
-                    with col2:
-                        st.metric("운영 모델 수", f"{sc.get('운영모델수', 0)}")
-                    with col3:
-                        st.metric("유입수", f"{sc.get('유입수', 0):,}")
-                    
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.metric("상품주문건수", f"{sc.get('상품주문건수', 0)}")
-                    with col2:
-                        st.metric("주문금액(백만)", f"{sc.get('주문금액', 0):.1f}")
-                    
-                    if sc.get("마케팅활동"):
-                        st.write(f"**마케팅활동**: {sc.get('마케팅활동')}")
-                    
-                    st.write("")
+                    col_sc1, col_sc2 = st.columns(2)
+                    with col_sc1:
+                        st.write("🔹 **쇼핑커넥트**")
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.metric("크리에이터", f"{sc.get('크리에이터운영수', 0)}")
+                            st.metric("모델", f"{sc.get('운영모델수', 0)}")
+                        with col2:
+                            st.metric("유입수", f"{sc.get('유입수', 0):,}")
+                            st.metric("주문", f"{sc.get('상품주문건수', 0)}")
+                        st.metric("금액(백만)", f"{sc.get('주문금액', 0):.1f}")
+                        if sc.get("마케팅활동"):
+                            st.caption(f"📌 {sc.get('마케팅활동')}")
                     
                     cj = data.get("공동구매", {})
-                    st.write("🔹 **공동구매**")
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        st.metric("크리에이터 운영 수", f"{cj.get('크리에이터운영수', 0)}")
-                    with col2:
-                        st.metric("운영 모델 수", f"{cj.get('운영모델수', 0)}")
-                    with col3:
-                        st.metric("상품주문건수", f"{cj.get('상품주문건수', 0)}")
+                    with col_sc2:
+                        st.write("🔹 **공동구매**")
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.metric("크리에이터", f"{cj.get('크리에이터운영수', 0)}")
+                            st.metric("모델", f"{cj.get('운영모델수', 0)}")
+                        with col2:
+                            st.metric("주문", f"{cj.get('상품주문건수', 0)}")
+                        st.metric("금액(백만)", f"{cj.get('주문금액', 0):.1f}")
+                        if cj.get("마케팅활동"):
+                            st.caption(f"📌 {cj.get('마케팅활동')}")
                     
-                    st.metric("주문금액(백만)", f"{cj.get('주문금액', 0):.1f}")
-                    
-                    if cj.get("마케팅활동"):
-                        st.write(f"**마케팅활동**: {cj.get('마케팅활동')}")
-                    
-                    st.write("---")
+                    st.divider()
                     
                     # 3. AI 라이브
                     st.subheader("🎥 3️⃣ AI 라이브")
@@ -1306,31 +1299,28 @@ def dashboard():
                         st.metric("소요비용(백만)", f"{live.get('소요비용', 0):.2f}")
                     
                     if live.get("마케팅활동"):
-                        st.write(f"**마케팅활동**: {live.get('마케팅활동')}")
+                        st.info(f"📌 **마케팅활동**: {live.get('마케팅활동')}")
                     
-                    st.write("---")
+                    st.divider()
                     
                     # 4. 당주 주요활동
                     st.subheader("🎯 당주 주요활동")
                     activity = data.get("당주주요활동", {})
                     
-                    if activity.get("구독"):
-                        with st.expander("📌 구독", key=f"act_sub_{unique_key}"):
-                            st.write(activity.get("구독"))
-                    if activity.get("광고운영"):
-                        with st.expander("📌 광고운영", key=f"act_ad_{unique_key}"):
-                            st.write(activity.get("광고운영"))
-                    if activity.get("딜판촉"):
-                        with st.expander("📌 딜판촉", key=f"act_deal_{unique_key}"):
-                            st.write(activity.get("딜판촉"))
-                    if activity.get("바이럴컨텐츠운영"):
-                        with st.expander("📌 바이럴/컨텐츠운영", key=f"act_viral_{unique_key}"):
-                            st.write(activity.get("바이럴컨텐츠운영"))
-                    if activity.get("기타"):
-                        with st.expander("📌 기타", key=f"act_etc_{unique_key}"):
-                            st.write(activity.get("기타"))
+                    activity_items = [
+                        ("📌 AI 라이브 효율 증대", "AI라이브효율증대"),
+                        ("📌 어필리에이트 내재화", "어필리에이트내재화"),
+                        ("📌 구독활성화", "구독활성화"),
+                        ("📌 기타 신규 프로젝트", "기타신규프로젝트")
+                    ]
                     
-                    st.write("---")
+                    for label, key in activity_items:
+                        if activity.get(key):
+                            with st.expander(label, key=f"act_{key}_{unique_key}"):
+                                st.write(activity.get(key))
+                            st.write("")  # spacing
+                    
+                    st.divider()
                     st.subheader("⚙️ 데이터 관리")
                     
                     col1, col2 = st.columns(2)
@@ -1346,7 +1336,7 @@ def dashboard():
                             weekly_data_list.remove(data)
                             with open("weekly_data.json", "w", encoding='utf-8') as f:
                                 json.dump(weekly_data_list, f, ensure_ascii=False, indent=2)
-                            st.success(f"✅ {selected_agency} - {week} ({month}) 데이터 삭제됨!")
+                            st.success(f"✅ {selected_agency} - {week_clean} ({month}) 데이터 삭제됨!")
                             st.rerun()
         else:
             st.info(f"등록된 데이터가 없습니다")
@@ -1381,68 +1371,147 @@ def dashboard():
         agency_data = [item for item in weekly_data_list if item.get("거래선") == selected_agency]
         
         if agency_data:
-            # 최신 주차순으로 정렬
-            agency_data_sorted = sorted(agency_data, key=lambda x: int(x.get("주차", "W00")[1:3]), reverse=True)
+            # 주차명 정렬 함수
+            def get_week_num(week_str):
+                num_str = ''.join(c for c in week_str if c.isdigit())
+                return int(num_str) if num_str else 0
             
-            for data in agency_data_sorted:
-                week = data.get("주차", "")
+            # 최신 주차순으로 정렬
+            agency_data_sorted = sorted(agency_data, key=lambda x: (get_week_num(x.get("주차", "W00")), x.get("월", "")), reverse=True)
+            
+            for idx, data in enumerate(agency_data_sorted):
+                week_raw = data.get("주차", "")
                 month = data.get("월", "")
-                week_key = f"{selected_agency}_{week}"
                 
-                with st.expander(f"**{week}** ({month})"):
-                    # 데이터 대시보드
-                    st.subheader("📊 입력 데이터")
+                # 주차명 정리
+                week_num = ''.join(c for c in week_raw if c.isdigit())
+                week_clean = f"W{week_num}" if week_num else week_raw
+                week_key = f"{selected_agency}_{week_clean}_{month}_{idx}"
+                
+                with st.expander(f"**{week_clean}** ({month})", expanded=False):
+                    # ===== 데이터 대시보드 =====
+                    st.subheader("📊 입력 데이터 & 분석")
+                    st.divider()
                     
-                    col1, col2, col3 = st.columns(3)
+                    # 1. 스마트스토어
+                    st.write("**🛒 네이버 스마트 스토어**")
+                    ss = data.get("네이버스마트스토어", {})
                     
-                    with col1:
-                        st.write("**🛒 네이버 스마트 스토어**")
-                        ss = data.get("네이버스마트스토어", {})
-                        st.text(f"신규 관심고객: {ss.get('신규관심고객수', 0):,}")
-                        st.text(f"신규구매 구매자: {ss.get('신규구매구매자수', 0):,}")
-                        st.text(f"재구매 구매자: {ss.get('재구매구매자수', 0):,}")
-                        if ss.get("마케팅활동"):
-                            st.caption(f"활동: {ss.get('마케팅활동')}")
+                    col_ss1, col_ss2 = st.columns([2, 1])
+                    with col_ss1:
+                        # 테이블
+                        ss_data = {
+                            "항목": ["신규 관심고객", "신규구매 구매자", "재구매 구매자", "합계"],
+                            "수량": [
+                                ss.get('신규관심고객수', 0),
+                                ss.get('신규구매구매자수', 0),
+                                ss.get('재구매구매자수', 0),
+                                ss.get('신규관심고객수', 0) + ss.get('신규구매구매자수', 0) + ss.get('재구매구매자수', 0)
+                            ]
+                        }
+                        ss_df = pd.DataFrame(ss_data)
+                        st.dataframe(ss_df, use_container_width=True, hide_index=True)
                     
-                    with col2:
-                        st.write("**📱 어필리에이트**")
+                    with col_ss2:
+                        # 파이 차트 (구매 비율)
+                        if ss.get('신규구매구매자수', 0) > 0 or ss.get('재구매구매자수', 0) > 0:
+                            pie_data = {
+                                "유형": ["신규구매", "재구매"],
+                                "수량": [ss.get('신규구매구매자수', 0), ss.get('재구매구매자수', 0)]
+                            }
+                            pie_df = pd.DataFrame(pie_data)
+                            pie_chart = px.pie(pie_df, names="유형", values="수량", title="구매자 구성")
+                            st.plotly_chart(pie_chart, use_container_width=True)
+                    
+                    if ss.get("마케팅활동"):
+                        st.info(f"📌 활동: {ss.get('마케팅활동')}")
+                    
+                    st.divider()
+                    
+                    # 2. 어필리에이트
+                    st.write("**📱 어필리에이트**")
+                    sc = data.get("쇼핑커넥트", {})
+                    cj = data.get("공동구매", {})
+                    
+                    col_af1, col_af2 = st.columns([1, 2])
+                    
+                    with col_af1:
+                        # 테이블
+                        af_data = {
+                            "채널": ["쇼핑커넥트", "공동구매"],
+                            "크리에이터": [sc.get('크리에이터운영수', 0), cj.get('크리에이터운영수', 0)],
+                            "주문건수": [sc.get('상품주문건수', 0), cj.get('상품주문건수', 0)],
+                            "금액(백만)": [f"{sc.get('주문금액', 0):.1f}", f"{cj.get('주문금액', 0):.1f}"]
+                        }
+                        af_df = pd.DataFrame(af_data)
+                        st.dataframe(af_df, use_container_width=True, hide_index=True)
+                    
+                    with col_af2:
+                        # 막대 차트
+                        chart_data = {
+                            "채널": ["쇼핑커넥트", "공동구매"],
+                            "주문건수": [sc.get('상품주문건수', 0), cj.get('상품주문건수', 0)],
+                            "금액(백만)": [sc.get('주문금액', 0), cj.get('주문금액', 0)]
+                        }
+                        chart_df = pd.DataFrame(chart_data)
+                        bar_chart = px.bar(chart_df, x="채널", y=["주문건수", "금액(백만)"], barmode="group", title="쇼핑커넥트 vs 공동구매")
+                        st.plotly_chart(bar_chart, use_container_width=True)
+                    
+                    if sc.get("마케팅활동") or cj.get("마케팅활동"):
+                        st.info(f"📌 쇼핑커넥트: {sc.get('마케팅활동', '-')} | 공동구매: {cj.get('마케팅활동', '-')}")
+                    
+                    st.divider()
+                    
+                    # 3. AI 라이브
+                    st.write("**🎥 AI 라이브**")
+                    live = data.get("AI라이브", {})
+                    
+                    col_live1, col_live2 = st.columns([2, 1])
+                    
+                    with col_live1:
+                        # 테이블
+                        live_cost = live.get('소요비용', 0.1)
+                        live_efficiency = live.get('방송매출', 0) / live_cost if live_cost > 0 else 0
                         
-                        sc = data.get("쇼핑커넥트", {})
-                        st.text(f"[쇼핑커넥트]")
-                        st.text(f"크리에이터: {sc.get('크리에이터운영수', 0)} / 모델: {sc.get('운영모델수', 0)}")
-                        st.text(f"주문: {sc.get('상품주문건수', 0)} / 금액: {sc.get('주문금액', 0):.1f}백만")
-                        
-                        cj = data.get("공동구매", {})
-                        st.text(f"[공동구매]")
-                        st.text(f"크리에이터: {cj.get('크리에이터운영수', 0)} / 모델: {cj.get('운영모델수', 0)}")
-                        st.text(f"주문: {cj.get('상품주문건수', 0)} / 금액: {cj.get('주문금액', 0):.1f}백만")
+                        live_data = {
+                            "항목": ["방송횟수", "방송매출(백만)", "소요비용(백만)", "효율(매출/비용)"],
+                            "값": [
+                                live.get('방송횟수', 0),
+                                f"{live.get('방송매출', 0):.1f}",
+                                f"{live_cost:.2f}",
+                                f"{live_efficiency:.2f}"
+                            ]
+                        }
+                        live_df = pd.DataFrame(live_data)
+                        st.dataframe(live_df, use_container_width=True, hide_index=True)
                     
-                    with col3:
-                        st.write("**🎥 AI 라이브**")
-                        live = data.get("AI라이브", {})
-                        st.text(f"방송횟수: {live.get('방송횟수', 0)}")
-                        st.text(f"방송매출: {live.get('방송매출', 0):.1f}백만")
-                        st.text(f"소요비용: {live.get('소요비용', 0):.2f}백만")
-                        if live.get("마케팅활동"):
-                            st.caption(f"활동: {live.get('마케팅활동')}")
+                    with col_live2:
+                        if live.get('방송횟수', 0) > 0:
+                            # 효율 게이지
+                            efficiency_color = "🟢" if live_efficiency > 1 else "🟡" if live_efficiency > 0.5 else "🔴"
+                            st.metric("효율도", f"{live_efficiency:.2f}배", delta=f"{efficiency_color} {'우수' if live_efficiency > 1 else '보통' if live_efficiency > 0.5 else '개선필요'}")
                     
-                    st.write("---")
+                    if live.get("마케팅활동"):
+                        st.info(f"📌 활동: {live.get('마케팅활동')}")
                     
-                    # 담당자 피드백 입력
+                    st.divider()
+                    
+                    # ===== 담당자 피드백 입력 =====
                     st.subheader("📝 담당자 피드백")
                     
                     # 기존 피드백 로드
                     existing_feedback = feedback_data.get(week_key, {})
                     
                     with st.form(f"feedback_form_{week_key}"):
+                        # 각 영역별 피드백
                         col1, col2 = st.columns(2)
                         
                         with col1:
                             st.write("**🛒 네이버 스마트 스토어**")
                             ss_feedback = st.text_area(
-                                "피드백", 
+                                "피드백",
                                 value=existing_feedback.get("네이버스마트스토어", ""),
-                                height=80,
+                                height=70,
                                 key=f"ss_fb_{week_key}",
                                 label_visibility="collapsed"
                             )
@@ -1452,8 +1521,58 @@ def dashboard():
                             af_feedback = st.text_area(
                                 "피드백",
                                 value=existing_feedback.get("어필리에이트", ""),
-                                height=80,
+                                height=70,
                                 key=f"af_fb_{week_key}",
+                                label_visibility="collapsed"
+                            )
+                        
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            st.write("**🎥 AI 라이브**")
+                            live_feedback = st.text_area(
+                                "피드백",
+                                value=existing_feedback.get("AI라이브", ""),
+                                height=70,
+                                key=f"live_fb_{week_key}",
+                                label_visibility="collapsed"
+                            )
+                        
+                        with col2:
+                            st.write("**🎯 당주 주요활동**")
+                            activity_feedback = st.text_area(
+                                "피드백",
+                                value=existing_feedback.get("당주주요활동", ""),
+                                height=70,
+                                key=f"activity_fb_{week_key}",
+                                label_visibility="collapsed"
+                            )
+                        
+                        st.write("---")
+                        
+                        if st.form_submit_button("💾 피드백 저장", use_container_width=True):
+                            # 피드백 데이터 저장
+                            feedback_data[week_key] = {
+                                "거래선": selected_agency,
+                                "주차": week_clean,
+                                "월": month,
+                                "네이버스마트스토어": ss_feedback,
+                                "어필리에이트": af_feedback,
+                                "AI라이브": live_feedback,
+                                "당주주요활동": activity_feedback,
+                                "저장일시": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                            }
+                            
+                            # feedback.json에 저장
+                            with open("feedback.json", "w", encoding='utf-8') as f:
+                                json.dump(feedback_data, f, ensure_ascii=False, indent=2)
+                            
+                            st.success("✅ 피드백이 저장되었습니다!")
+                            st.rerun()
+                    
+                    st.write("")
+        else:
+            st.info(f"등록된 데이터가 없습니다")
                                 label_visibility="collapsed"
                             )
                         
