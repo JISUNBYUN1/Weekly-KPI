@@ -8,27 +8,11 @@ import re
 import tempfile
 from pathlib import Path
 
-st.set_page_config(page_title="PP3G 통합 대시보드", page_icon="📊", layout="wide")
+st.set_page_config(page_title="PP3G | Marketing Performance", page_icon="▥", layout="wide")
 
-# 보고서용 Google Fonts 적용
-st.markdown("""
-<style>
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap');
+from executive_report import STYLE, render_executive
 
-* {
-    font-family: 'IBM Plex Sans KR', -apple-system, BlinkMacSystemFont, sans-serif !important;
-}
-
-html, body, [class*="css"] {
-    font-family: 'IBM Plex Sans KR', -apple-system, BlinkMacSystemFont, sans-serif !important;
-}
-
-h1, h2, h3, h4, h5, h6 {
-    font-weight: 600 !important;
-    font-family: 'IBM Plex Sans KR', -apple-system, BlinkMacSystemFont, sans-serif !important;
-}
-</style>
-""", unsafe_allow_html=True)
+st.markdown(STYLE, unsafe_allow_html=True)
 
 # 거래선 목록
 AGENCIES = ["평강", "문성", "케이디엘", "하나로", "회산", "현성", "클릭나라"]
@@ -303,8 +287,8 @@ def live_render_table(agencies):
 
 
 def live_render_page():
-    st.subheader("📹 라이브커머스 실적")
-    st.caption("2026년 · weeks_2026.json의 업무 주차 기준")
+    st.subheader("라이브커머스 실적")
+    st.caption("2026년 · 업무 주차 기준")
     try:
         data = live_load_data()
     except FileNotFoundError:
@@ -353,7 +337,8 @@ def live_render_page():
 
 # 로그인
 def login_page():
-    st.title("📊 PP3G 통합 대시보드")
+    st.title("PP3G 마케팅 성과 관리")
+    st.caption("주간 실적 · 거래선 활동 · 담당자 피드백")
     st.markdown("---")
     
     user_name = st.text_input("이름을 입력하세요")
@@ -601,34 +586,37 @@ def dashboard():
     
     # 사이드바 메뉴
     with st.sidebar:
-        st.title("📑 메뉴")
+        st.markdown("### PP3G")
+        st.caption("MARKETING PERFORMANCE")
         st.divider()
         
         pages = [
-            ("📊 전체", "전체"),
-            ("📈 FCST", "FCST"),
-            ("💎 프리미엄", "프리미엄"),
-            ("🛒 스마트스토어", "스마트스토어"),
-            ("📹 라이브커머스", "라이브"),
-            ("🤝 어필리에이트", "어필"),
-            ("✏️ 거래선입력", "거래선입력"),
-            ("📋 거래선현황", "거래선현황"),
-            ("💬 담당자피드백", "담당자피드백"),
+            ("경영진 보고", "전체"),
+            ("사업 전망", "FCST"),
+            ("프리미엄", "프리미엄"),
+            ("스마트스토어", "스마트"),
+            ("라이브커머스", "라이브"),
+            ("어필리에이트", "어필"),
+            ("주간 실적 입력", "거래선입력"),
+            ("거래선 기록", "거래선현황"),
+            ("담당자 피드백", "담당자피드백"),
         ]
         
         for emoji_name, page_key in pages:
-            if st.button(emoji_name, use_container_width=True, key=f"btn_{page_key}"):
+            if st.button(emoji_name, use_container_width=True, key=f"btn_{page_key}", type="primary" if st.session_state.page == page_key else "secondary"):
                 st.session_state.page = page_key
         
         st.divider()
         st.caption(f"사용자: {user_name}")
         
-        if st.button("←로그아웃", use_container_width=True):
+        if st.button("로그아웃", use_container_width=True):
             st.session_state.user_name = None
             st.rerun()
     
     # 메인 콘텐츠
-    st.title("📊 PP3G 통합 대시보드")
+    st.markdown('<div class="report-eyebrow">SAMSUNG PP3G / MARKETING PERFORMANCE</div>', unsafe_allow_html=True)
+    st.title("마케팅 성과 및 활동 보고")
+    st.caption("거래선 성과와 실행 현황을 한눈에 확인합니다.")
     st.divider()
     
     sales_data = load_sales_data()
@@ -637,136 +625,10 @@ def dashboard():
     
     current_page = st.session_state.page
     
-    # 전체
+    # 임원 보고 요약
     if current_page == "전체":
-        st.subheader("📊 대시보드 SUMMARY")
-        
-        # 탭 생성
-        tab1, tab2, tab3, tab4, tab5 = st.tabs(["📈 FCST", "🛒 스마트스토어", "📹 라이브커머스", "🤝 어필리에이트", "💎 프리미엄"])
-        
-        # Tab 1: FCST
-        with tab1:
-            st.write("#### FCST 현황")
-            if sales_data['bizplan']:
-                all_products = {}
-                for channel_data in sales_data['bizplan'].values():
-                    for product_name, product_models in channel_data.items():
-                        if product_name not in all_products:
-                            all_products[product_name] = {"SALES": {}, "ANNUAL": {}, "ACTION": {}, "2025": {}}
-                        for model_data in product_models.values():
-                            for key in ["SALES", "ANNUAL", "ACTION", "2025"]:
-                                if key in model_data:
-                                    for month, value in model_data[key].items():
-                                        if month not in all_products[product_name][key]:
-                                            all_products[product_name][key][month] = 0
-                                        if isinstance(value, (int, float)):
-                                            all_products[product_name][key][month] += value
-                
-                # 최신월만 표시
-                months = sorted(set().union(*[p.get("SALES", {}).keys() for p in all_products.values()]),
-                               key=lambda x: int(x.replace("월", "")) if "월" in x else 0, reverse=True)
-                if months:
-                    latest_month = months[0]
-                    st.write(f"**{latest_month} 현황**")
-                    
-                    rows = []
-                    grand_total_sales = sum(all_products[pn].get("SALES", {}).get(latest_month, 0) for pn in all_products)
-                    grand_total_annual = sum(all_products[pn].get("ANNUAL", {}).get(latest_month, 0) for pn in all_products)
-                    
-                    rows.append({
-                        "제품": "그룹 계",
-                        "실적(수량)": f"{grand_total_sales:,.0f}",
-                        "경영비(%)": f"{(grand_total_sales/grand_total_annual):.2f}%" if grand_total_annual > 0 else "-"
-                    })
-                    
-                    for product_name in PRODUCT_ORDER:
-                        if product_name in all_products:
-                            sales = all_products[product_name].get("SALES", {}).get(latest_month, 0)
-                            annual = all_products[product_name].get("ANNUAL", {}).get(latest_month, 1)
-                            rows.append({
-                                "제품": product_name,
-                                "실적(수량)": f"{sales:,.0f}",
-                                "경영비(%)": f"{(sales/annual):.2f}%" if annual > 0 else "-"
-                            })
-                    
-                    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-        
-        # Tab 2: 스마트스토어
-        with tab2:
-            st.write("#### 스마트스토어 현황")
-            if sales_data['smartstore'] and '월별' in sales_data['smartstore']:
-                months = sorted(list(sales_data['smartstore']['월별'].keys()), reverse=True)
-                if months:
-                    latest_month = months[0]
-                    st.write(f"**{latest_month} 현황**")
-                    
-                    st.dataframe(pd.DataFrame([
-                        {"거래선": k, **v} 
-                        for k, v in sales_data['smartstore']['월별'][latest_month].items() 
-                        if isinstance(v, dict)
-                    ]), use_container_width=True, hide_index=True)
-        
-        # Tab 3: 라이브커머스 (상세 탭과 같은 원본/단위 사용)
-        with tab3:
-            st.write("#### 라이브커머스 현황")
-            try:
-                live_data = live_load_data()
-                months = [f"{number}월" for number in range(12, 0, -1)
-                          if live_data["월별"].get(f"{number}월")]
-                if months:
-                    latest_month = months[0]
-                    st.write(f"**{latest_month} 현황**")
-                    live_render_table(live_data["월별"][latest_month])
-                else:
-                    st.info("월별 라이브커머스 데이터가 없습니다. 주차별 자료는 라이브커머스 메뉴에서 조회해주세요.")
-            except FileNotFoundError:
-                st.info("live_commerce_data.json 파일이 없습니다.")
-            except (OSError, ValueError, TypeError) as error:
-                st.error(f"라이브커머스 데이터를 읽을 수 없습니다: {error}")
-        
-        # Tab 4: 어필리에이트
-        with tab4:
-            st.write("#### 어필리에이트 현황")
-            affiliate_data = sales_data.get('affiliate', {})
-            if affiliate_data:
-                months = affiliate_data.get('월별', {})
-                if months:
-                    months_list = sorted(list(months.keys()), reverse=True)
-                    if months_list:
-                        latest_month = months_list[0]
-                        st.write(f"**{latest_month} 현황**")
-                        create_affiliate_table(months[latest_month], "")
-        
-        # Tab 5: 프리미엄
-        with tab5:
-            st.write("#### 프리미엄 현황")
-            if sales_data['premium']:
-                premium_data = sales_data['premium']
-                products = list(premium_data.keys())[:3]  # 최대 3개 제품만 표시
-                
-                for product in products:
-                    st.write(f"**{product}**")
-                    product_info = premium_data[product]
-                    
-                    if isinstance(product_info, dict):
-                        if '월별' in product_info:
-                            months = sorted(list(product_info['월별'].keys()), reverse=True)
-                            if months:
-                                latest_month = months[0]
-                                month_data = product_info['월별'][latest_month]
-                                st.dataframe(pd.DataFrame([
-                                    {"거래선": k, **v} 
-                                    for k, v in month_data.items() 
-                                    if isinstance(v, dict)
-                                ]), use_container_width=True, hide_index=True)
-                        else:
-                            st.write(product_info)
-                    elif isinstance(product_info, list):
-                        if product_info and isinstance(product_info[0], dict):
-                            st.dataframe(pd.DataFrame(product_info), use_container_width=True, hide_index=True)
-            else:
-                st.info("프리미엄 데이터가 없습니다")
-    
+        render_executive(st, Path(__file__).resolve().parent)
+
     # FCST
     elif current_page == "FCST":
         st.subheader("📈 FCST 현황")
