@@ -732,9 +732,16 @@ def dashboard():
     elif current_page == "어필":
         st.subheader("🤝 어필리에이트 실적")
         
-        affiliate_data = sales_data.get('affiliate', {})
+        # affiliate_data.json 로드
+        affiliate_data = {"월별": {}, "주차별": {}}
+        if os.path.exists("affiliate_data.json"):
+            try:
+                with open("affiliate_data.json", "r", encoding='utf-8') as f:
+                    affiliate_data = json.load(f)
+            except:
+                affiliate_data = {"월별": {}, "주차별": {}}
         
-        if affiliate_data:
+        if affiliate_data["월별"] or affiliate_data["주차별"]:
             # 드롭다운: 월 선택 (역순)
             all_months = ["1월", "2월", "3월", "4월", "5월", "6월", "7월", "8월", "9월", "10월", "11월", "12월"]
             all_months_reversed = list(reversed(all_months))
@@ -771,7 +778,7 @@ def dashboard():
                     num = int(''.join(filter(str.isdigit, w)))
                     return num
                 
-                return sorted(weeks_list, key=sort_key)
+                return sorted(weeks_list, key=sort_key, reverse=True)
             
             # 드롭다운: 주차 선택
             available_weeks = get_weeks_for_affiliate(selected_month)
@@ -785,27 +792,56 @@ def dashboard():
             
             if selected_week:
                 # 데이터 표시
-                st.write(f"**📊 {selected_month} {selected_week} 어필리에이트 실적**")
-                
-                # 월별 데이터
-                months = affiliate_data.get('월별', {})
-                if selected_month in months and selected_week == "계":
-                    create_affiliate_table(months[selected_month], f"📊 {selected_month} 어필리에이트 실적")
-                
-                # 주차별 데이터
-                weeks = affiliate_data.get('주차별', {})
-                
-                # W35A, W35B 등으로 저장된 데이터 찾기
-                week_base = selected_week.replace('A', '').replace('B', '')
-                if selected_week.endswith('A') or selected_week.endswith('B'):
-                    week_key = selected_week
+                if selected_week == "계":
+                    st.write(f"**📊 {selected_month} 어필리에이트 실적 (월 전체)**")
+                    
+                    # 월별 데이터 표시
+                    if selected_month in affiliate_data["월별"]:
+                        month_data = affiliate_data["월별"][selected_month]
+                        
+                        rows = []
+                        for agency, channels in month_data.items():
+                            for channel, data in channels.items():
+                                rows.append({
+                                    "거래선": agency,
+                                    "채널": channel,
+                                    "크리에이터": data.get('크리에이터운영수', 0),
+                                    "모델": data.get('운영모델', 0),
+                                    "유입수": f"{data.get('유입수', 0):,}",
+                                    "주문건수": f"{data.get('상품주문건수', 0):,}",
+                                    "전환율(%)": f"{data.get('전환율', 0):.4f}%",
+                                    "주문금액(백만)": f"{data.get('주문금액', 0) / 1000000:.2f}"
+                                })
+                        
+                        df = pd.DataFrame(rows)
+                        st.dataframe(df, use_container_width=True, hide_index=True)
+                    else:
+                        st.info("해당 월의 데이터가 없습니다")
                 else:
-                    week_key = selected_week
-                
-                if week_key in weeks:
-                    create_affiliate_table(weeks[week_key], f"📊 {selected_week} 어필리에이트 실적")
-                elif selected_week != "계":
-                    st.info("해당 주차의 데이터가 없습니다")
+                    st.write(f"**📊 {selected_month} {selected_week} 어필리에이트 실적**")
+                    
+                    # 주차별 데이터 표시
+                    if selected_week in affiliate_data["주차별"]:
+                        week_data = affiliate_data["주차별"][selected_week]
+                        
+                        rows = []
+                        for agency, channels in week_data.items():
+                            for channel, data in channels.items():
+                                rows.append({
+                                    "거래선": agency,
+                                    "채널": channel,
+                                    "크리에이터": data.get('크리에이터운영수', 0),
+                                    "모델": data.get('운영모델', 0),
+                                    "유입수": f"{data.get('유입수', 0):,}",
+                                    "주문건수": f"{data.get('상품주문건수', 0):,}",
+                                    "전환율(%)": f"{data.get('전환율', 0):.4f}%",
+                                    "주문금액(백만)": f"{data.get('주문금액', 0) / 1000000:.2f}"
+                                })
+                        
+                        df = pd.DataFrame(rows)
+                        st.dataframe(df, use_container_width=True, hide_index=True)
+                    else:
+                        st.info("해당 주차의 데이터가 없습니다")
         else:
             st.warning("어필리에이트 데이터가 없습니다")
     
@@ -1037,78 +1073,94 @@ def dashboard():
     elif current_page == "스마트":
         st.subheader("🛒 스마트스토어 실적")
         
-        smartstore_data = sales_data.get('smartstore', {})
+        # smartstore_data.json 로드
+        smartstore_data = {}
+        if os.path.exists("smartstore_data.json"):
+            try:
+                with open("smartstore_data.json", "r", encoding='utf-8') as f:
+                    smartstore_data = json.load(f)
+            except:
+                smartstore_data = {}
         
         if smartstore_data:
-            # 월별 데이터만 (월_주차 제외)
-            months = [m for m in smartstore_data.keys() if '주차' not in m]
-            if months:
-                months_list = sorted(months, reverse=True)
-                selected_month = st.selectbox("월 선택", months_list, key="ss_month_select")
+            # 탭: 신규관심고객 / 구매비중
+            tab1, tab2 = st.tabs(["📌 신규 관심고객", "📊 구매비중 변화"])
+            
+            with tab1:
+                st.subheader("신규 관심고객 유입 현황")
                 
-                if selected_month in smartstore_data:
-                    month_data = smartstore_data[selected_month]
-                    
+                # 월/주차 선택
+                col1, col2 = st.columns(2)
+                with col1:
+                    data_type = st.radio("데이터 종류", ["월별", "주차별"], key="ss_interest_type")
+                with col2:
+                    if data_type == "월별":
+                        all_months = list(reversed(list(smartstore_data["신규관심고객"]["월별"].keys())))
+                        selected = st.selectbox("월 선택", all_months, key="ss_interest_month")
+                        display_data = smartstore_data["신규관심고객"]["월별"].get(selected, {})
+                    else:
+                        all_weeks = sorted(smartstore_data["신규관심고객"]["주차별"].keys(), reverse=True)
+                        selected = st.selectbox("주차 선택", all_weeks, key="ss_interest_week")
+                        display_data = smartstore_data["신규관심고객"]["주차별"].get(selected, {})
+                
+                if display_data:
                     # 테이블 생성
-                    st.markdown(f"### 📊 {selected_month} 스마트스토어 실적")
+                    rows = []
+                    for agency, data in display_data.items():
+                        row = {
+                            "거래선": agency,
+                            "누적관심고객수": f"{data.get('누적관심고객수', 0):,}",
+                            "신규관심고객수": f"{data.get('신규관심고객수', 0):,}",
+                        }
+                        if data_type == "월별":
+                            row["전월비(%)"] = f"{data.get('전월비', 0):.2f}%"
+                        else:
+                            row["전주비(%)"] = f"{data.get('전주비', 0):.2f}%"
+                        rows.append(row)
                     
-                    html = """
-                    <style>
-                        .ss-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-                        .ss-table th, .ss-table td { border: 1px solid #d0d0d0; padding: 8px 6px; text-align: center; height: 26px; }
-                        .ss-header { background: #4472c4; color: white; font-weight: 600; }
-                        .ss-total { background: #fff2cc; font-weight: 600; border-top: 2px solid #333; }
-                        .ss-data { background: #f9f9f9; }
-                        .ss-data:nth-child(even) { background: #ffffff; }
-                        .ss-agency { text-align: left; font-weight: 500; padding-left: 8px; }
-                        .ss-number { text-align: right; padding-right: 4px; font-family: 'Courier New', monospace; }
-                    </style>
-                    <table class="ss-table">
-                        <thead>
-                            <tr>
-                                <th class="ss-header">거래선</th>
-                                <th class="ss-header">고객수</th>
-                                <th class="ss-header">신규유입</th>
-                                <th class="ss-header">전월차</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                    """
+                    df = pd.DataFrame(rows)
+                    st.dataframe(df, use_container_width=True, hide_index=True)
+            
+            with tab2:
+                st.subheader("구매비중 변화 (신규 vs 재구매)")
+                
+                # 월/주차 선택
+                col1, col2 = st.columns(2)
+                with col1:
+                    data_type = st.radio("데이터 종류", ["월별", "주차별"], key="ss_purchase_type")
+                with col2:
+                    if data_type == "월별":
+                        all_months = list(reversed(list(smartstore_data["구매비중"]["월별"].keys())))
+                        selected = st.selectbox("월 선택", all_months, key="ss_purchase_month")
+                        display_data = smartstore_data["구매비중"]["월별"].get(selected, {})
+                    else:
+                        all_weeks = sorted(smartstore_data["구매비중"]["주차별"].keys(), reverse=True)
+                        selected = st.selectbox("주차 선택", all_weeks, key="ss_purchase_week")
+                        display_data = smartstore_data["구매비중"]["주차별"].get(selected, {})
+                
+                if display_data:
+                    # 테이블 생성
+                    rows = []
+                    for agency, data in display_data.items():
+                        row = {
+                            "거래선": agency,
+                            "신규구매고객": f"{data.get('신규구매고객수', 0):,}",
+                            "신규구매비중(%)": f"{data.get('신규구매비중', 0):.2f}%",
+                            "재구매고객": f"{data.get('재구매고객수', 0):,}",
+                            "재구매비중(%)": f"{data.get('재구매비중', 0):.2f}%",
+                        }
+                        if data_type == "월별":
+                            row["신규전월비(%)"] = f"{data.get('신규구매전월비', 0):.2f}%"
+                            row["재전월비(%)"] = f"{data.get('재구매전월비', 0):.2f}%"
+                        else:
+                            row["신규전주비(%)"] = f"{data.get('신규구매전주비', 0):.2f}%"
+                            row["재전주비(%)"] = f"{data.get('재구매전주비', 0):.2f}%"
+                        rows.append(row)
                     
-                    # 전체 행
-                    if '전체' in month_data:
-                        total = month_data['전체']
-                        html += f"""
-                            <tr class="ss-total">
-                                <td class="ss-agency">전체</td>
-                                <td class="ss-number">{total.get('고객수', 0):,}</td>
-                                <td class="ss-number">{total.get('신규유입', 0):,}</td>
-                                <td class="ss-number">{total.get('전월차', 0):+,}</td>
-                            </tr>
-                        """
-                    
-                    # 거래선별 행
-                    for agency in AGENCIES:
-                        if agency in month_data:
-                            data = month_data[agency]
-                            html += f"""
-                                <tr class="ss-data">
-                                    <td class="ss-agency">{agency}</td>
-                                    <td class="ss-number">{data.get('고객수', 0):,}</td>
-                                    <td class="ss-number">{data.get('신규유입', 0):,}</td>
-                                    <td class="ss-number">{data.get('전월차', 0):+,}</td>
-                                </tr>
-                            """
-                    
-                    html += """
-                        </tbody>
-                    </table>
-                    """
-                    st.markdown(html, unsafe_allow_html=True)
+                    df = pd.DataFrame(rows)
+                    st.dataframe(df, use_container_width=True, hide_index=True)
         else:
             st.warning("스마트스토어 데이터가 없습니다")
-    
-    # 프리미엄
     elif current_page == "프리미엄":
         st.subheader("💎 프리미엄 제품별 실적")
         
