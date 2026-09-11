@@ -3,6 +3,10 @@ import pandas as pd
 import json
 from datetime import datetime
 import os
+import math
+import re
+import tempfile
+from pathlib import Path
 
 st.set_page_config(page_title="PP3G 통합 대시보드", page_icon="📊", layout="wide")
 
@@ -72,7 +76,6 @@ def load_sales_data():
     
     base_files = {
         'smartstore': 'smartstore_customers.json',
-        'live_commerce': 'live_commerce_complete.json',
         'affiliate': 'affiliate_final_data.json',
         'coupang_ppm': 'coupang_ppm_data.json'
     }
@@ -111,6 +114,242 @@ def load_feedback():
 def save_feedback(data):
     with open("feedback.json", "w", encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+
+# 라이브커머스: 원 단위 원본과 표시용 값을 분리한다.
+def live_week_sort_key(week):
+    match = re.fullmatch(r"W(\d{1,2})([AB]?)", week)
+    if not match or not 1 <= int(match.group(1)) <= 53:
+        raise ValueError(f"올바르지 않은 주차: {week}")
+    return int(match.group(1)), match.group(2)
+
+
+def live_weeks_for_month(calendar, month):
+    """제공된 업무 주차표를 사용하며 월경계만 A/B로 분할한다."""
+    month_num = int(month.replace("월", ""))
+    result = set()
+    for week, info in calendar.items():
+        live_week_sort_key(week)
+        months = info["month"]
+        months = months if isinstance(months, list) else [months]
+        if not months or len(months) > 2 or any(
+            isinstance(m, bool) or not isinstance(m, int) or not 1 <= m <= 12
+            for m in months
+        ):
+            raise ValueError(f"{week}: 월 정보가 올바르지 않습니다")
+        if month_num not in months:
+            continue
+        if week.endswith(("A", "B")):
+            if len(months) == 1 or months[0 if week.endswith("A") else 1] == month_num:
+                result.add(week)
+        elif len(months) == 1:
+            result.add(week)
+        else:
+            result.add(week + ("A" if months.index(month_num) == 0 else "B"))
+    return ["계"] + sorted(result, key=live_week_sort_key, reverse=True)
+
+
+def live_sum_records(records):
+    """비어 있는 비용/실적은 0이 아니다. 하나라도 미제공이면 합계도 미제공."""
+    records = list(records)
+    result = {}
+    for field in ("방송횟수", "방송매출", "소요비용"):
+        values = [record.get(field) for record in records]
+        result[field] = sum(values) if values and all(v is not None for v in values) else None
+    result["마케팅활동"] = "\n".join(dict.fromkeys(
+        record["마케팅활동"].strip() for record in records
+        if record.get("마케팅활동") and record["마케팅활동"].strip()
+    ))
+    return result
+
+
+def live_aggregate_periods(periods):
+    periods = list(periods)
+    return {
+        agency: live_sum_records(period.get(agency, {}) for period in periods)
+        for agency in AGENCIES
+    }
+
+
+def live_validate_data(data):
+    """검증 후 새 객체 반환. 주차별 '계'는 상세 주차만으로 재계산한다."""
+    if not isinstance(data, dict):
+        raise ValueError("최상위 데이터는 JSON 객체여야 합니다")
+    if data.get("금액단위", "원") != "원":
+        raise ValueError("금액단위는 '원'이어야 합니다. 백만 단위 자료는 먼저 원으로 변환해주세요")
+    if data.get("기준연도", 2026) != 2026:
+        raise ValueError("이 화면은 weeks_2026.json 기준입니다. 다른 연도 자료를 혼합할 수 없습니다")
+    if data.get("schema_version", 1) != 1:
+        raise ValueError("지원하지 않는 라이브커머스 데이터 형식 버전입니다")
+    result = {**data}
+    for section in ("월별", "주차별"):
+        source = data.get(section, {})
+        if not isinstance(source, dict):
+            raise ValueError(f"{section}은 JSON 객체여야 합니다")
+        result[section] = {}
+        for period, agencies in source.items():
+            if section == "월별":
+                if not re.fullmatch(r"([1-9]|1[0-2])월", period):
+                    raise ValueError(f"올바르지 않은 월: {period}")
+            elif period == "계":
+                continue  # 수동 합계는 이중 집계하지 않는다.
+            else:
+                live_week_sort_key(period)
+            if not isinstance(agencies, dict):
+                raise ValueError(f"{section}/{period}: 거래선별 객체가 필요합니다")
+            result[section][period] = {}
+            for agency, record in agencies.items():
+                if agency not in AGENCIES or not isinstance(record, dict):
+                    raise ValueError(f"{section}/{period}/{agency}: 거래선 또는 데이터 형식 확인")
+                clean = dict(record)
+                for field in ("방송횟수", "방송매출", "소요비용"):
+                    value = record.get(field)
+                    if value is not None:
+                        if isinstance(value, bool) or not isinstance(value, (int, float)):
+                            raise ValueError(f"{period}/{agency}/{field}: 숫자 또는 null이 필요합니다")
+                        if not math.isfinite(value) or value < 0:
+                            raise ValueError(f"{period}/{agency}/{field}: 유한한 0 이상 숫자가 필요합니다")
+                        if field == "방송횟수" and int(value) != value:
+                            raise ValueError(f"{period}/{agency}/방송횟수: 정수가 필요합니다")
+                    clean[field] = value
+                activity = record.get("마케팅활동", "")
+                if activity is not None and not isinstance(activity, str):
+                    raise ValueError(f"{period}/{agency}/마케팅활동: 문자열이 필요합니다")
+                clean["마케팅활동"] = activity or ""
+                result[section][period][agency] = clean
+    details = list(result["주차별"].values())
+    result["주차별"] = {
+        "계": live_aggregate_periods(details) if details else {},
+        **result["주차별"],
+    }
+    return result
+
+
+def live_load_data(path=None):
+    """매 화면 실행 시 읽어 수정 직후 데이터가 한 시간 캐시에 묶이지 않게 한다."""
+    path = Path(path) if path is not None else Path(__file__).resolve().with_name("live_commerce_data.json")
+    with path.open(encoding="utf-8-sig") as file:
+        return live_validate_data(json.load(file))
+
+
+def live_save_data(data, path=None):
+    """원 단위 데이터를 검증 후 원자적으로 저장. 조회 시에는 호출하지 않는다.
+
+    파일 손상 방지용이며 동시 편집 충돌 방지나 클라우드 영구 저장을 보장하지 않는다.
+    """
+    validated = live_validate_data(data)
+    path = Path(path) if path is not None else Path(__file__).resolve().with_name("live_commerce_data.json")
+    temp_name = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent,
+                                         prefix=path.name + ".", suffix=".tmp", delete=False) as file:
+            temp_name = file.name
+            json.dump(validated, file, ensure_ascii=False, indent=2, allow_nan=False)
+            file.write("\n")
+            file.flush()
+            os.fsync(file.fileno())
+        os.replace(temp_name, path)
+    finally:
+        if temp_name is not None and os.path.exists(temp_name):
+            os.unlink(temp_name)
+
+
+def live_select_period(data, calendar, month, week):
+    """UI의 '계'는 선택 월이다. 전체 주차 합계와 혼용하지 않는다."""
+    if week == "계":
+        monthly = data.get("월별", {}).get(month, {})
+        if monthly:
+            return monthly, "월별 제공 실적"
+        available = live_weeks_for_month(calendar, month)[1:]
+        periods = [data["주차별"][w] for w in available if data.get("주차별", {}).get(w)]
+        if periods:
+            return live_aggregate_periods(periods), "입력된 주차만의 합계 · 월 마감 실적 아님"
+        return {}, "해당 월에 제공된 데이터가 없습니다"
+    if week not in live_weeks_for_month(calendar, month):
+        return {}, "선택 월에 속하지 않는 주차입니다"
+    return data.get("주차별", {}).get(week, {}), "주차별 제공 실적"
+
+
+def live_table_rows(agencies):
+    if not agencies:
+        return []
+    records = {agency: agencies.get(agency, {}) for agency in AGENCIES}
+    total = live_sum_records(records.values())
+    total["마케팅활동"] = "거래선별 내용 참조"
+    rows = []
+    for agency, record in [("전체", total)] + list(records.items()):
+        count = record.get("방송횟수")
+        sale = record.get("방송매출")
+        cost = record.get("소요비용")
+        rows.append({
+            "거래선": agency,
+            "방송횟수": f"{count:,.0f}" if count is not None else "미제공",
+            "방송매출(백만)": f"{sale / 1000000:,.2f}" if sale is not None else "미제공",
+            "소요비용(백만)": f"{cost / 1000000:,.2f}" if cost is not None else "미제공",
+            "마케팅활동": record.get("마케팅활동") or "미제공",
+        })
+    return rows
+
+
+def live_render_table(agencies):
+    st.dataframe(pd.DataFrame(live_table_rows(agencies)), use_container_width=True, hide_index=True)
+    st.caption("금액 단위: 백만원 · 소수점 둘째 자리 표시 · 미제공과 0은 구분합니다.")
+    if any(record.get("마케팅활동") for record in agencies.values()):
+        with st.expander("📝 마케팅활동 전문 보기"):
+            for agency in AGENCIES:
+                activity = agencies.get(agency, {}).get("마케팅활동")
+                if activity:
+                    st.write(f"**{agency}**")
+                    st.text(activity)
+
+
+def live_render_page():
+    st.subheader("📹 라이브커머스 실적")
+    st.caption("2026년 · weeks_2026.json의 업무 주차 기준")
+    try:
+        data = live_load_data()
+    except FileNotFoundError:
+        st.warning("live_commerce_data.json이 없습니다. 앱과 같은 폴더에 파일을 추가해주세요.")
+        data = {"월별": {}, "주차별": {}}
+    except (OSError, ValueError, TypeError) as error:
+        st.error(f"라이브커머스 데이터를 읽을 수 없습니다: {error}")
+        return
+    try:
+        with Path(__file__).resolve().with_name("weeks_2026.json").open(encoding="utf-8-sig") as file:
+            calendar = json.load(file)
+        # 전체 캘린더를 먼저 확인해 잘못된 월/주차를 조용히 누락하지 않는다.
+        calendar_weeks = set()
+        for number in range(1, 13):
+            calendar_weeks.update(live_weeks_for_month(calendar, f"{number}월")[1:])
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
+        st.warning(f"주차 파일 확인 필요: {error}. 월별 데이터만 조회합니다.")
+        calendar, calendar_weeks = {}, set()
+
+    months = [f"{number}월" for number in range(12, 0, -1)]
+    default_index = next((i for i, month in enumerate(months) if data["월별"].get(month)), 0)
+    month = st.selectbox("월 선택", months, index=default_index, key="live_month_select")
+    weeks = live_weeks_for_month(calendar, month)
+    week = st.selectbox("주차 선택", weeks, key=f"live_week_select_{month}")
+    st.write("---")
+    period_label = "월 전체" if week == "계" else week
+    st.write(f"**📊 {month} 라이브커머스 실적 ({period_label})**")
+
+    unassigned = set(data["주차별"]) - {"계"} - calendar_weeks
+    pending = data.get("확인필요", [])
+    if unassigned or pending:
+        st.warning("주차표와 일치하지 않는 원본 데이터가 있습니다. 해당 자료는 월·주차 상세에 자동 배정하지 않았습니다.")
+        with st.expander("주차 확인 사항"):
+            for week_name in sorted(unassigned):
+                st.text(f"{week_name}: weeks_2026.json에 해당 표시 주차가 없습니다.")
+            for item in pending:
+                if isinstance(item, dict):
+                    st.text(f"{item.get('원본월', '')} {item.get('원본주차', '')}: {item.get('사유', '주차 확인 필요')}")
+
+    agencies, note = live_select_period(data, calendar, month, week)
+    if agencies:
+        st.caption(note)
+        live_render_table(agencies)
+    else:
+        st.info(f"{month} {week}: 제공된 데이터가 없습니다.")
 
 # 로그인
 def login_page():
@@ -467,34 +706,23 @@ def dashboard():
                         if isinstance(v, dict)
                     ]), use_container_width=True, hide_index=True)
         
-        # Tab 3: 라이브커머스
+        # Tab 3: 라이브커머스 (상세 탭과 같은 원본/단위 사용)
         with tab3:
             st.write("#### 라이브커머스 현황")
-            if sales_data['live_commerce']:
-                # 8월 데이터 있는지 확인
-                if '8월' in sales_data['live_commerce'] and '월별' in sales_data['live_commerce']['8월']:
-                    months_data = sales_data['live_commerce']['8월']['월별']
-                    months_list = sorted([m for m in months_data.keys() if isinstance(months_data[m], dict)], reverse=True)
-                    
-                    if months_list:
-                        latest_month = months_list[0]
-                        st.write(f"**{latest_month} 현황**")
-                        
-                        month_data = months_data[latest_month]
-                        display_data = {}
-                        if '전체' in month_data:
-                            display_data['전체'] = month_data['전체']
-                        for agency in AGENCIES:
-                            if agency in month_data:
-                                display_data[agency] = month_data[agency]
-                        
-                        create_live_commerce_table(display_data, "")
-                    else:
-                        st.info("라이브커머스 데이터가 없습니다")
+            try:
+                live_data = live_load_data()
+                months = [f"{number}월" for number in range(12, 0, -1)
+                          if live_data["월별"].get(f"{number}월")]
+                if months:
+                    latest_month = months[0]
+                    st.write(f"**{latest_month} 현황**")
+                    live_render_table(live_data["월별"][latest_month])
                 else:
-                    st.info("라이브커머스 데이터가 없습니다")
-            else:
-                st.info("라이브커머스 데이터가 없습니다")
+                    st.info("월별 라이브커머스 데이터가 없습니다. 주차별 자료는 라이브커머스 메뉴에서 조회해주세요.")
+            except FileNotFoundError:
+                st.info("live_commerce_data.json 파일이 없습니다.")
+            except (OSError, ValueError, TypeError) as error:
+                st.error(f"라이브커머스 데이터를 읽을 수 없습니다: {error}")
         
         # Tab 4: 어필리에이트
         with tab4:
@@ -581,152 +809,7 @@ def dashboard():
     # 프리미엄
     # 라이브커머스
     elif current_page == "라이브":
-        st.subheader("📹 라이브커머스")
-        
-        live_commerce_data = sales_data.get('live_commerce', {})
-        
-        if live_commerce_data:
-            # 드롭다운: 월 선택 (역순)
-            all_months = ["1월", "2월", "3월", "4월", "5월", "6월", "7월", "8월", "9월", "10월", "11월", "12월"]
-            all_months_reversed = list(reversed(all_months))
-            selected_month = st.selectbox("월 선택", all_months_reversed, key="live_month_select")
-            
-            # 월별 주차 매핑 (weeks_2026 로드)
-            try:
-                with open('weeks_2026.json', 'r', encoding='utf-8') as f:
-                    weeks_2026 = json.load(f)
-            except:
-                weeks_2026 = {}
-            
-            def get_weeks_for_live(month):
-                """해당 월의 주차 리스트 반환"""
-                month_num = int(month.replace('월', ''))
-                weeks_list = ["계"]  # 첫 번째는 "계" (전체)
-                
-                for week, info in weeks_2026.items():
-                    month_info = info['month']
-                    
-                    if isinstance(month_info, int):
-                        if month_info == month_num:
-                            weeks_list.append(week)
-                    elif isinstance(month_info, list):
-                        if month_num in month_info:
-                            if month_num == month_info[0]:
-                                weeks_list.append(f"{week}A")
-                            else:
-                                weeks_list.append(f"{week}B")
-                
-                def sort_key(w):
-                    if w == "계":
-                        return -1
-                    num = int(''.join(filter(str.isdigit, w)))
-                    return num
-                
-                return sorted(weeks_list, key=sort_key)
-            
-            # 드롭다운: 주차 선택
-            available_weeks = get_weeks_for_live(selected_month)
-            if available_weeks:
-                selected_week = st.selectbox("주차 선택", available_weeks, key="live_week_select")
-            else:
-                st.warning(f"{selected_month}에 주차 데이터가 없습니다")
-                selected_week = None
-            
-            st.write("---")
-            
-            if selected_week:
-                # 데이터 표시
-                if selected_week == "계":
-                    st.write(f"**📊 {selected_month} 라이브커머스 실적 (월 전체)**")
-                else:
-                    st.write(f"**📊 {selected_month} {selected_week} 라이브커머스 실적**")
-                
-                # 월별 데이터
-                if selected_month in live_commerce_data and selected_week == "계":
-                    if '월별' in live_commerce_data and selected_month in live_commerce_data['월별']:
-                        month_data = live_commerce_data['월별'][selected_month]
-                        
-                        # 소요비용 데이터 로드
-                        live_cost_data = {}
-                        try:
-                            with open('live_commerce_cost_data.json', 'r', encoding='utf-8') as f:
-                                live_cost_data = json.load(f)
-                                for agency in live_cost_data:
-                                    live_cost_data[agency]['소요비용'] = live_cost_data[agency].get('소요비용', 0) / 12
-                        except:
-                            live_cost_data = {}
-                        
-                        # 데이터 구성
-                        display_data = {}
-                        if '전체' in month_data:
-                            display_data['전체'] = month_data['전체'].copy()
-                            total_cost = sum([data.get('소요비용', 0) for data in live_cost_data.values()])
-                            display_data['전체']['소요비용'] = total_cost
-                        
-                        for agency in AGENCIES:
-                            if agency in month_data:
-                                display_data[agency] = month_data[agency].copy()
-                                if agency in live_cost_data:
-                                    display_data[agency]['소요비용'] = live_cost_data[agency]['소요비용']
-                                else:
-                                    display_data[agency]['소요비용'] = 0
-                        
-                        create_live_commerce_table(display_data, f"📊 {selected_month} 라이브커머스 실적")
-                    else:
-                        st.info("해당 월의 데이터가 없습니다")
-                
-                # 주차별 데이터
-                else:
-                    week_base = selected_week.replace('A', '').replace('B', '')
-                    
-                    # 8월 데이터 확인
-                    if selected_month == "8월" and '8월' in live_commerce_data and '주차별' in live_commerce_data['8월']:
-                        weeks_data = live_commerce_data['8월']['주차별']
-                        
-                        # 주차명 매핑
-                        week_mapping = {
-                            "31B주": "W31B", "32주": "W32", "33주": "W33",
-                            "34주": "W34", "35주": "W35", "36A주": "W36A"
-                        }
-                        
-                        # 역 매핑 (W35 → 35주)
-                        reverse_mapping = {v: k for k, v in week_mapping.items()}
-                        
-                        selected_week_key = reverse_mapping.get(selected_week, selected_week)
-                        
-                        if selected_week_key in weeks_data:
-                            week_data = weeks_data[selected_week_key]
-                            
-                            # 소요비용 데이터 로드
-                            live_cost_data = {}
-                            try:
-                                with open('live_commerce_cost_data.json', 'r', encoding='utf-8') as f:
-                                    live_cost_data = json.load(f)
-                            except:
-                                live_cost_data = {}
-                            
-                            # 데이터 구성
-                            display_data = {}
-                            if '전체' in week_data:
-                                display_data['전체'] = week_data['전체'].copy()
-                                total_cost = sum([data.get('소요비용', 0) for data in live_cost_data.values()])
-                                display_data['전체']['소요비용'] = total_cost
-                            
-                            for agency in AGENCIES:
-                                if agency in week_data:
-                                    display_data[agency] = week_data[agency].copy()
-                                    if agency in live_cost_data:
-                                        display_data[agency]['소요비용'] = live_cost_data[agency]['소요비용']
-                                    else:
-                                        display_data[agency]['소요비용'] = 0
-                            
-                            create_live_commerce_table(display_data, f"📊 {selected_week} 라이브커머스 실적")
-                        else:
-                            st.info("해당 주차의 데이터가 없습니다")
-                    else:
-                        st.info("해당 월/주차의 데이터가 없습니다")
-        else:
-            st.warning("라이브커머스 데이터가 없습니다")
+        live_render_page()
     
     # 어필리에이트
     elif current_page == "어필":
