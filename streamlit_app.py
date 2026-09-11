@@ -10,7 +10,7 @@ from pathlib import Path
 
 st.set_page_config(page_title="PP3G | Marketing Performance", page_icon="▥", layout="wide")
 
-from executive_report import STYLE, render_executive
+from executive_report import STYLE, render_month_week_analysis, render_product_performance
 
 st.markdown(STYLE, unsafe_allow_html=True)
 
@@ -98,6 +98,29 @@ def load_feedback():
 def save_feedback(data):
     with open("feedback.json", "w", encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+def save_raw_upload(uploaded_file):
+    """담당자가 올린 원본을 파일명 충돌 없이 보관하고 목록에 남긴다."""
+    safe_name = Path(uploaded_file.name).name
+    if not safe_name or safe_name in {".", ".."}:
+        raise ValueError("파일명을 확인해주세요")
+    upload_dir = Path(__file__).resolve().with_name("raw_uploads")
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    destination = upload_dir / f"{timestamp}_{safe_name}"
+    with destination.open("wb") as handle:
+        handle.write(uploaded_file.getbuffer())
+    manifest_path = upload_dir / "upload_manifest.json"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else []
+    except ValueError:
+        manifest = []
+    manifest.append({"파일명": safe_name, "저장파일": destination.name,
+                     "용량(byte)": destination.stat().st_size,
+                     "업로드시각": datetime.now().strftime("%Y-%m-%d %H:%M:%S")})
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    return destination, manifest
 
 # 라이브커머스: 원 단위 원본과 표시용 값을 분리한다.
 def live_week_sort_key(week):
@@ -591,8 +614,8 @@ def dashboard():
         st.divider()
         
         pages = [
-            ("경영진 보고", "전체"),
-            ("사업 전망", "FCST"),
+            ("월간ㆍ주간 분석", "전체"),
+            ("품목별 실적", "FCST"),
             ("프리미엄", "프리미엄"),
             ("스마트스토어", "스마트"),
             ("라이브커머스", "라이브"),
@@ -605,6 +628,7 @@ def dashboard():
         for emoji_name, page_key in pages:
             if st.button(emoji_name, use_container_width=True, key=f"btn_{page_key}", type="primary" if st.session_state.page == page_key else "secondary"):
                 st.session_state.page = page_key
+                st.rerun()
         
         st.divider()
         st.caption(f"사용자: {user_name}")
@@ -615,8 +639,8 @@ def dashboard():
     
     # 메인 콘텐츠
     st.markdown('<div class="report-eyebrow">SAMSUNG PP3G / MARKETING PERFORMANCE</div>', unsafe_allow_html=True)
-    st.title("마케팅 성과 및 활동 보고")
-    st.caption("거래선 성과와 실행 현황을 한눈에 확인합니다.")
+    st.title("마케팅 성과 및 활동 분석")
+    st.caption("월간 성과와 주간 실행 활동을 연결해 확인합니다.")
     st.divider()
     
     sales_data = load_sales_data()
@@ -625,48 +649,13 @@ def dashboard():
     
     current_page = st.session_state.page
     
-    # 임원 보고 요약
+    # 월간ㆍ주간 분석
     if current_page == "전체":
-        render_executive(st, Path(__file__).resolve().parent)
+        render_month_week_analysis(st, Path(__file__).resolve().parent)
 
-    # FCST
+    # 품목별 실적
     elif current_page == "FCST":
-        st.subheader("📈 FCST 현황")
-        
-        if sales_data['bizplan']:
-            all_products = {}
-            for channel_data in sales_data['bizplan'].values():
-                for product_name, product_models in channel_data.items():
-                    if product_name not in all_products:
-                        all_products[product_name] = {"SALES": {}, "ANNUAL": {}, "ACTION": {}, "2025": {}}
-                    for model_data in product_models.values():
-                        for key in ["SALES", "ANNUAL", "ACTION", "2025"]:
-                            if key in model_data:
-                                for month, value in model_data[key].items():
-                                    if month not in all_products[product_name][key]:
-                                        all_products[product_name][key][month] = 0
-                                    if isinstance(value, (int, float)):
-                                        all_products[product_name][key][month] += value
-            
-            months = sorted(set().union(*[p.get("SALES", {}).keys() for p in all_products.values()]),
-                           key=lambda x: int(x.replace("월", "")) if "월" in x else 0, reverse=True)
-            
-            selected_month = st.selectbox("월 선택", months)
-            
-            rows = []
-            for product_name in PRODUCT_ORDER:
-                if product_name in all_products:
-                    product_data = all_products[product_name]
-                    sales = product_data.get("SALES", {}).get(selected_month, 0)
-                    annual = product_data.get("ANNUAL", {}).get(selected_month, 1)
-                    
-                    rows.append({
-                        "제품": product_name,
-                        "실적(수량)": f"{sales:,.0f}",
-                        "경영비(%)": f"{(sales/annual):.2f}%" if annual > 0 else "-"
-                    })
-            
-            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        render_product_performance(st, Path(__file__).resolve().parent)
     
     # 프리미엄
     # 라이브커머스
@@ -1430,7 +1419,28 @@ def dashboard():
     
     # 담당자 피드백
     elif current_page == "담당자피드백":
-        st.subheader("💬 담당자 피드백")
+        st.subheader("담당자 피드백")
+        st.caption("피드백 작성과 함께 실적 RAW 파일을 보관합니다.")
+        with st.expander("RAW 실적 파일 업로드", expanded=False):
+            uploaded_raw = st.file_uploader(
+                "실적 파일", type=["xlsx", "xls", "csv", "json"],
+                key="feedback_raw_upload", help="원본 실적 파일을 업로드하세요."
+            )
+            if uploaded_raw and st.button("RAW 파일 저장", key="save_feedback_raw"):
+                try:
+                    destination, manifest = save_raw_upload(uploaded_raw)
+                    st.success(f"{destination.name} 저장 완료")
+                    st.caption(f"보관 파일 수: {len(manifest)}")
+                except (OSError, ValueError) as error:
+                    st.error(f"RAW 파일을 저장할 수 없습니다: {error}")
+            manifest_path = Path(__file__).resolve().with_name("raw_uploads") / "upload_manifest.json"
+            if manifest_path.exists():
+                try:
+                    stored_files = json.loads(manifest_path.read_text(encoding="utf-8"))
+                    if stored_files:
+                        st.dataframe(pd.DataFrame(stored_files[-10:]), use_container_width=True, hide_index=True)
+                except ValueError:
+                    st.warning("RAW 업로드 목록을 읽을 수 없습니다.")
         
         # weekly_data.json 로드
         weekly_data_list = []
