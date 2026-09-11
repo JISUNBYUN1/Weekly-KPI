@@ -747,45 +747,20 @@ def dashboard():
             all_months_reversed = list(reversed(all_months))
             selected_month = st.selectbox("월 선택", all_months_reversed, key="affiliate_month_select")
             
-            # 월별 주차 매핑 (weeks_2026 로드)
-            try:
-                with open('weeks_2026.json', 'r', encoding='utf-8') as f:
-                    weeks_2026 = json.load(f)
-            except:
-                weeks_2026 = {}
+            # 주차 드롭다운: "계"를 항상 맨 위에
+            available_weeks = list(affiliate_data["주차별"].keys())
             
-            def get_weeks_for_affiliate(month):
-                """해당 월의 주차 리스트 반환"""
-                month_num = int(month.replace('월', ''))
-                weeks_list = ["계"]  # 첫 번째는 "계" (전체)
-                
-                for week, info in weeks_2026.items():
-                    month_info = info['month']
-                    
-                    if isinstance(month_info, int):
-                        if month_info == month_num:
-                            weeks_list.append(week)
-                    elif isinstance(month_info, list):
-                        if month_num in month_info:
-                            if month_num == month_info[0]:
-                                weeks_list.append(f"{week}A")
-                            else:
-                                weeks_list.append(f"{week}B")
-                
-                def sort_key(w):
-                    if w == "계":
-                        return -1
-                    num = int(''.join(filter(str.isdigit, w)))
-                    return num
-                
-                return sorted(weeks_list, key=sort_key, reverse=True)
+            # "계"를 맨 앞으로
+            if "계" in available_weeks:
+                available_weeks.remove("계")
+                available_weeks = ["계"] + sorted(available_weeks, reverse=True)
+            else:
+                available_weeks = sorted(available_weeks, reverse=True)
             
-            # 드롭다운: 주차 선택
-            available_weeks = get_weeks_for_affiliate(selected_month)
             if available_weeks:
                 selected_week = st.selectbox("주차 선택", available_weeks, key="affiliate_week_select")
             else:
-                st.warning(f"{selected_month}에 주차 데이터가 없습니다")
+                st.warning("주차 데이터가 없습니다")
                 selected_week = None
             
             st.write("---")
@@ -793,14 +768,14 @@ def dashboard():
             if selected_week:
                 # 데이터 표시
                 if selected_week == "계":
-                    st.write(f"**📊 {selected_month} 어필리에이트 실적 (월 전체)**")
+                    st.write(f"**📊 어필리에이트 실적 (전체 계)**")
                     
-                    # 월별 데이터 표시
-                    if selected_month in affiliate_data["월별"]:
-                        month_data = affiliate_data["월별"][selected_month]
+                    # 계 데이터 표시
+                    if selected_week in affiliate_data["주차별"]:
+                        week_data = affiliate_data["주차별"][selected_week]
                         
                         rows = []
-                        for agency, channels in month_data.items():
+                        for agency, channels in week_data.items():
                             for channel, data in channels.items():
                                 rows.append({
                                     "거래선": agency,
@@ -816,9 +791,9 @@ def dashboard():
                         df = pd.DataFrame(rows)
                         st.dataframe(df, use_container_width=True, hide_index=True)
                     else:
-                        st.info("해당 월의 데이터가 없습니다")
+                        st.info("계 데이터가 없습니다")
                 else:
-                    st.write(f"**📊 {selected_month} {selected_week} 어필리에이트 실적**")
+                    st.write(f"**📊 {selected_week} 어필리에이트 실적**")
                     
                     # 주차별 데이터 표시
                     if selected_week in affiliate_data["주차별"]:
