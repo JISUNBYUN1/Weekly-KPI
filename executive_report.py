@@ -331,6 +331,90 @@ def weeks_for_month(calendar, month):
     return sorted(weeks, key=week_key, reverse=True)
 
 
+def fmt_amount(value, unit="", decimals=0):
+    """절대값 표시(매출·수량 등): 1,242백만원"""
+    return f"{value:,.{decimals}f}{unit}" if number(value) else "데이터없음"
+
+
+def fmt_delta(value, unit="", decimals=0):
+    """증감값 표시(신규관심고객, 격차, 전월비 등): +821명 / △591명 / 0"""
+    if not number(value):
+        return "데이터없음"
+    if value == 0:
+        return f"0{unit}"
+    sign = "+" if value > 0 else "△"
+    return f"{sign}{abs(value):,.{decimals}f}{unit}"
+
+
+def star_overall_totals(star_data, scope_type, scope_value):
+    """선택 구간의 전 품목 합산 S/I·S/O 수량/금액."""
+    if scope_type == "월별":
+        qty = _combined_month_total(star_data, "수량", scope_value)
+        amt = _combined_month_total(star_data, "금액", scope_value)
+    else:
+        qty = star_data.get("수량", {}).get("주차별", {}).get(scope_value, {}).get("total", {})
+        amt = star_data.get("금액", {}).get("주차별", {}).get(scope_value, {}).get("total", {})
+    total = {"S/I_수량": 0, "S/O_수량": 0, "S/I_금액": 0, "S/O_금액": 0}
+    for metrics in qty.values():
+        total["S/I_수량"] += metrics.get("S/I", 0)
+        total["S/O_수량"] += metrics.get("S/O", 0)
+    for metrics in amt.values():
+        total["S/I_금액"] += metrics.get("S/I", 0)
+        total["S/O_금액"] += metrics.get("S/O", 0)
+    return total
+
+
+def benchmark_insights(rows):
+    """거래선 간 특이값(1위/최하위)을 찾아 벤치마킹 제언 리스트로 반환."""
+    insights = []
+    valid = [(r["거래선"], r["라이브 매출(백만)"], r.get("방송횟수")) for r in rows if number(r["라이브 매출(백만)"])]
+    if len(valid) >= 2:
+        valid.sort(key=lambda x: x[1], reverse=True)
+        top_name, top_val, top_cnt = valid[0]
+        bottom_name, bottom_val, bottom_cnt = valid[-1]
+        insights.append(f"🏆 라이브 매출 1위: **{top_name}** {fmt_amount(top_val, '백만원', 1)} (방송 {top_cnt}회)")
+        insights.append(f"⚠️ 라이브 매출 최하위: **{bottom_name}** {fmt_amount(bottom_val, '백만원', 1)} (방송 {bottom_cnt}회) "
+                         f"— {top_name} 대비 {fmt_delta(bottom_val - top_val, '백만원', 1)}. 방송 횟수·편성 전략 벤치마킹 제안")
+
+    valid2 = [(r["거래선"], r["신규 관심고객"]) for r in rows if number(r["신규 관심고객"])]
+    if len(valid2) >= 2:
+        valid2.sort(key=lambda x: x[1], reverse=True)
+        top_name, top_val = valid2[0]
+        bottom_name, bottom_val = valid2[-1]
+        insights.append(f"🏆 신규 관심고객 1위: **{top_name}** {fmt_delta(top_val, '명')}")
+        insights.append(f"⚠️ 신규 관심고객 최하위: **{bottom_name}** {fmt_delta(bottom_val, '명')} "
+                         f"— {top_name} 유입 활동 벤치마킹 필요 (격차 {fmt_delta(top_val - bottom_val, '명')})")
+    return insights
+
+
+def star_benchmark_insights(star_data, scope_type, scope_value, prev_scope_value):
+    """품목 간 S/O 성장률 특이값(1위/최하위)을 찾아 벤치마킹 제언 리스트로 반환."""
+    if not prev_scope_value:
+        return []
+    if scope_type == "월별":
+        qty = _combined_month_total(star_data, "수량", scope_value)
+        qty_prev = _combined_month_total(star_data, "수량", prev_scope_value)
+    else:
+        qty = star_data.get("수량", {}).get("주차별", {}).get(scope_value, {}).get("total", {})
+        qty_prev = star_data.get("수량", {}).get("주차별", {}).get(prev_scope_value, {}).get("total", {})
+
+    changes = []
+    for product, metrics in qty.items():
+        prev = qty_prev.get(product, {}).get("S/O")
+        change = _pct_change(metrics.get("S/O"), prev)
+        if change is not None:
+            changes.append((product, change, metrics.get("S/O")))
+    if len(changes) < 2:
+        return []
+    changes.sort(key=lambda x: x[1], reverse=True)
+    top, bottom = changes[0], changes[-1]
+    return [
+        f"🏆 S/O 성장률 1위 품목: **{top[0]}** {fmt_delta(top[1], '%', 1)} (수량 {fmt_amount(top[2], '', 0)})",
+        f"⚠️ S/O 성장률 최하위 품목: **{bottom[0]}** {fmt_delta(bottom[1], '%', 1)} (수량 {fmt_amount(bottom[2], '', 0)}) "
+        f"— {top[0]} 판매 채널·프로모션 벤치마킹 검토",
+    ]
+
+
 def report_rows(live, affiliate, smart):
     rows = []
     for agency in AGENCIES:
@@ -362,27 +446,27 @@ def activities(records, agency, week=None):
 
 
 def infer(agency, row, weekly_smart, activity_rows, scope):
+    """줄글 대신 '지표 +값' 형태의 리포트형 관찰/제안을 생성."""
     observations, proposals = [], []
     if number(row["라이브 매출(백만)"]) and row["라이브 매출(백만)"] > 0:
-        observations.append(f"라이브 매출 {row['라이브 매출(백만)']:,.2f}백만원이 {scope}에 기록됐습니다.")
-        proposals.append("방송 횟수·시간대·상품 구성을 다음 기간에도 기록해 회차당 매출을 비교하세요.")
+        observations.append(f"라이브 매출 {fmt_amount(row['라이브 매출(백만)'], '백만원', 1)}")
+        proposals.append("방송 횟수·시간대·상품 구성 기록으로 회차당 매출 비교")
     if number(row["어필리에이트 주문금액(백만)"]) and row["어필리에이트 주문금액(백만)"] > 0:
-        observations.append(f"어필리에이트 주문금액 {row['어필리에이트 주문금액(백만)']:,.2f}백만원이 기록됐습니다.")
-        proposals.append("채널별 유입·주문·금액을 함께 입력해 전환 개선 활동을 판단하세요.")
+        observations.append(f"어필리에이트 주문금액 {fmt_amount(row['어필리에이트 주문금액(백만)'], '백만원', 1)}")
+        proposals.append("채널별 유입·주문·금액 기록으로 전환 개선 판단")
     if number(row["신규 관심고객"]):
-        direction = "순증" if row["신규 관심고객"] > 0 else "순감" if row["신규 관심고객"] < 0 else "변동 없음"
-        observations.append(f"신규 관심고객은 {abs(row['신규 관심고객']):,.0f}명 {direction}입니다.")
+        observations.append(f"신규 관심고객 {fmt_delta(row['신규 관심고객'], '명')}")
         if row["신규 관심고객"] <= 0:
-            proposals.append("관심고객 감소 원인과 유입 경로를 확인하고 회복 목표를 설정하세요.")
+            proposals.append("관심고객 감소 원인·유입 경로 점검 및 회복 목표 설정")
     change = weekly_smart.get("전주비") if isinstance(weekly_smart, dict) else None
     if number(change):
-        observations.append(f"선택 주차 신규 관심고객은 전주 대비 {change:,.1f}% 변동했습니다.")
+        observations.append(f"신규 관심고객 전주비 {fmt_delta(change, '%', 1)}")
     if activity_rows:
         labels = ", ".join(dict.fromkeys(channel for _, channel, _ in activity_rows))
-        observations.append(f"기록 활동: {labels}. 해당 기간 실적과의 동행은 관찰되나 인과관계는 검증 전입니다.")
-        proposals.append("차주에도 활동별 목표 지표와 결과를 함께 기록하세요.")
+        observations.append(f"기록 활동: {labels}")
+        proposals.append("차주에도 활동별 목표 지표·결과 함께 기록")
     else:
-        proposals.append("차주 활동·목표 지표·결과를 입력해 성과 분석 근거를 확보하세요.")
+        proposals.append("차주 활동·목표 지표·결과 입력으로 성과 분석 근거 확보")
     return observations, list(dict.fromkeys(proposals))
 
 
@@ -414,10 +498,51 @@ def render_month_week_analysis(st, root):
 
     st.subheader(f"{scope} 핵심 실적")
     totals = [strict_sum(row[field] for row in rows) for field in ("라이브 매출(백만)", "어필리에이트 주문금액(백만)", "신규 관심고객")]
-    for col, label, value, unit, precision in zip(st.columns(3), ["라이브커머스 매출", "어필리에이트 주문금액", "스마트스토어 신규 관심고객"], totals, ["백만원", "백만원", "명"], [2, 2, 0]):
+    metric_cols = list(st.columns(5))
+    for col, label, value, unit, precision in zip(metric_cols[:3], ["라이브커머스 매출", "어필리에이트 주문금액", "스마트스토어 신규 관심고객"], totals, ["백만원", "백만원", "명"], [2, 2, 0]):
         with col:
             st.metric(label, f"{shown(value, precision)} {unit}" if number(value) else "미제공")
+
+    # 셀인(S/I)·셀아웃(S/O) 실적 카드 (STAR 기반, 금액=억원, 전월비/전주비 delta 표시)
+    if star_data:
+        month_num = star_month_sort_key(month)
+        prev_month = f"{month_num - 1}월" if month_num > 1 else None
+        if monthly:
+            cur_totals = star_overall_totals(star_data, "월별", month)
+            prev_totals = star_overall_totals(star_data, "월별", prev_month) if prev_month else None
+            change_label = "전월비"
+        else:
+            cur_totals = star_overall_totals(star_data, "주차별", selected_week)
+            all_weeks_asc = sorted(
+                set(star_data.get("수량", {}).get("주차별", {}).keys()) | set(star_data.get("금액", {}).get("주차별", {}).keys()),
+                key=star_week_sort_key)
+            idx = all_weeks_asc.index(selected_week) if selected_week in all_weeks_asc else -1
+            prev_week = all_weeks_asc[idx - 1] if idx > 0 else None
+            prev_totals = star_overall_totals(star_data, "주차별", prev_week) if prev_week else None
+            change_label = "전주비"
+        si_amt = cur_totals["S/I_금액"] / 1e8
+        so_amt = cur_totals["S/O_금액"] / 1e8
+        si_delta = _pct_change(cur_totals["S/I_금액"], prev_totals["S/I_금액"]) if prev_totals else None
+        so_delta = _pct_change(cur_totals["S/O_금액"], prev_totals["S/O_금액"]) if prev_totals else None
+        with metric_cols[3]:
+            st.metric("셀인(S/I) 실적(억원)", f"{si_amt:,.1f}", delta=f"{si_delta:+.1f}% ({change_label})" if number(si_delta) else None)
+        with metric_cols[4]:
+            st.metric("셀아웃(S/O) 실적(억원)", f"{so_amt:,.1f}", delta=f"{so_delta:+.1f}% ({change_label})" if number(so_delta) else None)
     st.caption("실적 형식이 확정되면 동일 기준으로 KPI에 연결합니다. 채널 간 금액은 합산하지 않습니다.")
+
+    # 요약(써머리) — 거래선/품목 벤치마킹 인사이트: 특이 거래선·품목을 짚고 실행 가능한 제언을 제시
+    st.subheader("📊 요약 및 벤치마킹 인사이트")
+    summary_lines = benchmark_insights(rows)
+    if star_data:
+        month_num = star_month_sort_key(month)
+        prev_month = f"{month_num - 1}월" if month_num > 1 else None
+        if monthly and prev_month:
+            summary_lines += star_benchmark_insights(star_data, "월별", month, prev_month)
+    if summary_lines:
+        for line in summary_lines:
+            st.markdown("- " + line)
+    else:
+        st.info("비교 가능한 데이터가 부족합니다.")
 
     st.subheader("채널별 비교 분석")
     display = []
@@ -425,7 +550,7 @@ def render_month_week_analysis(st, root):
         item = {key: value if key == "거래선" else shown(value, 2 if "백만" in key else 0) for key, value in row.items()}
         activity_rows = activities(weekly, row["거래선"], None if monthly else selected_week)
         observations, _ = infer(row["거래선"], row, smart_data.get(row["거래선"], {}), activity_rows, scope)
-        item["요약"] = " ".join(observations[:2]) if observations else "제공된 지표가 없습니다."
+        item["요약"] = " · ".join(observations[:3]) if observations else "제공된 지표가 없습니다."
         display.append(item)
     st.dataframe(pd.DataFrame(display), use_container_width=True, hide_index=True)
     
@@ -461,6 +586,21 @@ def render_month_week_analysis(st, root):
     target = st.selectbox("거래선 선택", AGENCIES, key=f"action_agency_{month}_{selected_week}")
     row = next(row for row in rows if row["거래선"] == target)
     _, proposals = infer(target, row, smart_data.get(target, {}), activities(weekly, target, None if monthly else selected_week), scope)
+
+    # 벤치마킹 인사이트 중 이 거래선(최하위)에 해당하는 항목을 최우선 Action Item으로 추가
+    bench_proposals = []
+    valid = [(r["거래선"], r["라이브 매출(백만)"]) for r in rows if number(r["라이브 매출(백만)"])]
+    if len(valid) >= 2:
+        valid.sort(key=lambda x: x[1], reverse=True)
+        if valid[-1][0] == target:
+            bench_proposals.append(f"{valid[0][0]} 대비 라이브 매출 최하위 — 방송 횟수·편성 전략 벤치마킹")
+    valid2 = [(r["거래선"], r["신규 관심고객"]) for r in rows if number(r["신규 관심고객"])]
+    if len(valid2) >= 2:
+        valid2.sort(key=lambda x: x[1], reverse=True)
+        if valid2[-1][0] == target:
+            bench_proposals.append(f"{valid2[0][0]} 대비 신규 관심고객 최하위 — 유입 활동 벤치마킹")
+    proposals = bench_proposals + [p for p in proposals if p not in bench_proposals]
+
     st.dataframe(pd.DataFrame([{"우선순위": index + 1, "Action Item": value, "대상 기간": "차월" if monthly else "차주"} for index, value in enumerate(proposals)]), use_container_width=True, hide_index=True)
     if errors:
         with st.expander("데이터 읽기 안내"):
