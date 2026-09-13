@@ -30,46 +30,55 @@ h1 {font-size:2rem!important;letter-spacing:-.055em;font-weight:700!important;} 
 
 
 def load_star_xlsx(root):
-    """STAR.xlsx 또는 STAR.csv 파일 로드 및 분석"""
+    """STAR.xlsx 파일 로드 및 분석 (header_row=7)"""
     try:
-        # XLSX 먼저 시도
         star_path = Path(root) / "STAR.xlsx"
-        if not star_path.exists():
-            # CSV 시도
-            star_path = Path(root) / "STAR.csv"
-        
         if not star_path.exists():
             return {}, []
         
-        # 파일 형식에 따라 읽기
-        try:
-            if str(star_path).endswith('.csv'):
-                df = pd.read_csv(star_path, encoding='utf-8-sig')
-            else:
-                df = pd.read_excel(star_path, sheet_name=0)
-        except Exception as e:
-            return {}, [f"STAR 파일 읽기 오류: {str(e)}"]
+        # header=7로 읽기 (실제 헤더가 7번째 행)
+        df = pd.read_excel(star_path, sheet_name=0, header=7)
         
-        # 필요한 컬럼 확인
-        required_cols = ['영업그룹', '기준품목', '주', '월', '메져_구분']
+        # 필요한 칼럼 확인
+        required_cols = ['기준품목', '월(AB)', '주(AB)']
         if not all(col in df.columns for col in required_cols):
-            return {}, [f"STAR.xlsx 필수 컬럼 부족: {required_cols}"]
+            return {}, [f"STAR.xlsx 필수 칼럼 부족"]
         
-        # 품목별, 주차별 S/I, S/O, FCST, RTF 데이터 구성
+        # S/I, S/O, FCST, RTF 칼럼명
+        si_fcst_col = '◆_AP1_S/I FCST_예상'
+        si_actual_col = '◆_매출'  # S/I 실적
+        so_fcst_col = '◆_AP1_S/O FCST_예상'
+        so_actual_col = '◆_실판매_모바일/유통직판 포함'  # S/O 실적
+        rtf_fcst_col = '◆_AP1_RTF_예상'
+        
+        # 데이터 구성
         result = {}
-        for _, row in df.iterrows():
+        for idx, row in df.iterrows():
             product = row.get('기준품목', '미분류')
-            week = row.get('주', 'W00')
-            month = row.get('월', '')
-            measure = row.get('메져_구분', '')
+            month = str(row.get('월(AB)', '')).strip()
+            week = str(row.get('주(AB)', '')).strip()
             
-            key = f"{month}_{week}_{product}_{measure}"
+            # NaN 또는 빈 값 제외
+            if not month or month == 'nan' or pd.isna(row.get('월(AB)')):
+                continue
+            if not week or week == 'nan' or pd.isna(row.get('주(AB)')):
+                continue
+            
+            key = f"{month}_{week}_{product}"
+            
+            # 값 추출 (NaN은 0으로 처리)
+            si_fcst = row.get(si_fcst_col, 0)
+            si_actual = row.get(si_actual_col, 0)
+            so_fcst = row.get(so_fcst_col, 0)
+            so_actual = row.get(so_actual_col, 0)
+            rtf_fcst = row.get(rtf_fcst_col, 0)
+            
             result[key] = {
-                'S/I_FCST': row.get('◆_AP1_S/I FCST_예상', 0),
-                'S/I_실적': row.get('◆_매출', 0),
-                'S/O_FCST': row.get('◆_AP1_S/O FCST_예상', 0),
-                'S/O_실적': row.get('◆_실판매_모바일/유통직판 포함', 0),
-                'RTF_FCST': row.get('◆_AP1_RTF_예상', 0),
+                'S/I_FCST': si_fcst if pd.notna(si_fcst) else 0,
+                'S/I_실적': si_actual if pd.notna(si_actual) else 0,
+                'S/O_FCST': so_fcst if pd.notna(so_fcst) else 0,
+                'S/O_실적': so_actual if pd.notna(so_actual) else 0,
+                'RTF_FCST': rtf_fcst if pd.notna(rtf_fcst) else 0,
             }
         
         return result, []
