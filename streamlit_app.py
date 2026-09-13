@@ -3,7 +3,7 @@
 Run:
     streamlit run streamlit_app.py
 
-The default file is STAR(2).xlsx.  The sidebar also accepts the recurring
+The default file is STAR.xlsx.  The sidebar also accepts the recurring
 RAW Excel upload from the manager-feedback workflow.
 """
 
@@ -20,7 +20,7 @@ import streamlit as st
 
 st.set_page_config(page_title="삼성 PP3G 실적", page_icon="📊", layout="wide")
 
-DEFAULT_FILE = Path("upload/STAR(2).xlsx")
+DEFAULT_FILE = Path("upload/STAR.xlsx")
 DIMENSIONS = ["영업그룹", "기준품목", "SMSS_ATTR01", "SMSS_ATTR02", "SMSS_ATTR03"]
 
 
