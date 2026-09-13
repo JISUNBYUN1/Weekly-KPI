@@ -10,7 +10,7 @@ from pathlib import Path
 
 st.set_page_config(page_title="PP3G | Marketing Performance", page_icon="▥", layout="wide")
 
-from executive_report import STYLE, render_month_week_analysis, render_product_performance
+from executive_report import STYLE, render_month_week_analysis, render_product_performance, render_product_performance_with_star
 
 st.markdown(STYLE, unsafe_allow_html=True)
 
@@ -655,7 +655,11 @@ def dashboard():
 
     # 품목별 실적
     elif current_page == "FCST":
-        render_product_performance(st, Path(__file__).resolve().parent)
+        tab1, tab2 = st.tabs(["STAR 기반 실적", "채널별 실적"])
+        with tab1:
+            render_product_performance_with_star(st, Path(__file__).resolve().parent)
+        with tab2:
+            render_product_performance(st, Path(__file__).resolve().parent)
     
     # 프리미엄
     # 라이브커머스
@@ -1420,27 +1424,6 @@ def dashboard():
     # 담당자 피드백
     elif current_page == "담당자피드백":
         st.subheader("담당자 피드백")
-        st.caption("피드백 작성과 함께 실적 RAW 파일을 보관합니다.")
-        with st.expander("RAW 실적 파일 업로드", expanded=False):
-            uploaded_raw = st.file_uploader(
-                "실적 파일", type=["xlsx", "xls", "csv", "json"],
-                key="feedback_raw_upload", help="원본 실적 파일을 업로드하세요."
-            )
-            if uploaded_raw and st.button("RAW 파일 저장", key="save_feedback_raw"):
-                try:
-                    destination, manifest = save_raw_upload(uploaded_raw)
-                    st.success(f"{destination.name} 저장 완료")
-                    st.caption(f"보관 파일 수: {len(manifest)}")
-                except (OSError, ValueError) as error:
-                    st.error(f"RAW 파일을 저장할 수 없습니다: {error}")
-            manifest_path = Path(__file__).resolve().with_name("raw_uploads") / "upload_manifest.json"
-            if manifest_path.exists():
-                try:
-                    stored_files = json.loads(manifest_path.read_text(encoding="utf-8"))
-                    if stored_files:
-                        st.dataframe(pd.DataFrame(stored_files[-10:]), use_container_width=True, hide_index=True)
-                except ValueError:
-                    st.warning("RAW 업로드 목록을 읽을 수 없습니다.")
         
         # weekly_data.json 로드
         weekly_data_list = []

@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 
 import pandas as pd
+import openpyxl
 
 AGENCIES = ["평강", "문성", "케이디엘", "하나로", "회산", "현성", "클릭나라"]
 CHANNELS = ("네이버스마트스토어", "쇼핑커넥트", "공동구매", "AI라이브")
@@ -26,6 +27,42 @@ h1 {font-size:2rem!important;letter-spacing:-.055em;font-weight:700!important;} 
 @media print {[data-testid="stSidebar"],header,footer,.stButton {display:none!important;}.stApp {background:#fff;}.block-container {padding:0;max-width:none;}}
 </style>
 """
+
+
+def load_star_xlsx(root):
+    """STAR.xlsx 파일 로드 및 분석"""
+    try:
+        star_path = Path(root) / "STAR.xlsx"
+        if not star_path.exists():
+            return {}, []
+        
+        df = pd.read_excel(star_path, sheet_name=0)
+        
+        # 필요한 컬럼 확인
+        required_cols = ['영업그룹', '기준품목', '주', '월', '메져_구분']
+        if not all(col in df.columns for col in required_cols):
+            return {}, [f"STAR.xlsx 필수 컬럼 부족: {required_cols}"]
+        
+        # 품목별, 주차별 S/I, S/O, FCST, RTF 데이터 구성
+        result = {}
+        for _, row in df.iterrows():
+            product = row.get('기준품목', '미분류')
+            week = row.get('주', 'W00')
+            month = row.get('월', '')
+            measure = row.get('메져_구분', '')
+            
+            key = f"{month}_{week}_{product}_{measure}"
+            result[key] = {
+                'S/I_FCST': row.get('◆_AP1_S/I FCST_예상', 0),
+                'S/I_실적': row.get('◆_매출', 0),
+                'S/O_FCST': row.get('◆_AP1_S/O FCST_예상', 0),
+                'S/O_실적': row.get('◆_실판매_모바일/유통직판 포함', 0),
+                'RTF_FCST': row.get('◆_AP1_RTF_예상', 0),
+            }
+        
+        return result, []
+    except Exception as e:
+        return {}, [f"STAR.xlsx 로드 오류: {str(e)}"]
 
 
 def read_json(root, filename, errors, default=None):
@@ -204,6 +241,74 @@ def collect_product_data(root):
     return result, errors
 
 
+def render_product_performance_with_star(st, root):
+    """STAR.xlsx 기반 품목별 S/I, S/O, FCST, RTF 분석"""
+    star_data, star_errors = load_star_xlsx(root)
+    
+    st.subheader("품목별 실적 분석 (RAW 데이터)")
+    
+    if not star_data:
+        st.info("STAR.xlsx 품목별 실적 데이터가 없습니다.")
+        for error in star_errors:
+            st.error(error)
+        return
+    
+    # 월 선택
+    months = sorted(set(key.split('_')[0] for key in star_data.keys() if key.split('_')[0]))
+    if not months:
+        st.warning("사용 가능한 월 데이터가 없습니다.")
+        return
+    
+    selected_month = st.selectbox("대상 월", months, key="product_star_month")
+    
+    # 선택한 월의 데이터 필터링
+    month_data = {k: v for k, v in star_data.items() if k.startswith(f"{selected_month}_")}
+    
+    if not month_data:
+        st.warning(f"{selected_month} 데이터가 없습니다.")
+        return
+    
+    # 품목별 집계
+    product_summary = {}
+    for key, data in month_data.items():
+        parts = key.split('_')
+        if len(parts) >= 4:
+            product = parts[2]
+            if product not in product_summary:
+                product_summary[product] = {
+                    'S/I_FCST': 0, 'S/I_실적': 0,
+                    'S/O_FCST': 0, 'S/O_실적': 0,
+                    'RTF_FCST': 0
+                }
+            for k, v in data.items():
+                if k in product_summary[product]:
+                    product_summary[product][k] += v if number(v) else 0
+    
+    # 테이블 구성
+    display_rows = []
+    for product, metrics in sorted(product_summary.items()):
+        si_rate = (metrics['S/I_실적'] / metrics['S/I_FCST'] * 100) if metrics['S/I_FCST'] > 0 else 0
+        so_rate = (metrics['S/O_실적'] / metrics['S/O_FCST'] * 100) if metrics['S/O_FCST'] > 0 else 0
+        
+        display_rows.append({
+            "품목": product,
+            "S/I FCST": f"{metrics['S/I_FCST']:,.0f}",
+            "S/I 실적": f"{metrics['S/I_실적']:,.0f}",
+            "S/I 달성율(%)": f"{si_rate:.1f}",
+            "S/O FCST": f"{metrics['S/O_FCST']:,.0f}",
+            "S/O 실적": f"{metrics['S/O_실적']:,.0f}",
+            "S/O 달성율(%)": f"{so_rate:.1f}",
+            "RTF FCST": f"{metrics['RTF_FCST']:,.0f}"
+        })
+    
+    st.dataframe(pd.DataFrame(display_rows), use_container_width=True, hide_index=True)
+    
+    if star_errors:
+        with st.expander("데이터 읽기 안내"):
+            for error in star_errors:
+                st.error(error)
+
+
 def render_product_performance(st, root):
     data, errors = collect_product_data(root)
     st.subheader("품목별 실적")
@@ -225,4 +330,3 @@ def render_product_performance(st, root):
     st.line_chart(pd.DataFrame(trend).set_index("월"), color="#164c96", height=300)
     st.caption("현재 원본은 채널별·월별 품목 실적입니다. 주차별 품목 실적 파일이 추가되면 같은 화면에 주간 추이를 연결합니다.")
     for error in errors: st.error(error)
-
