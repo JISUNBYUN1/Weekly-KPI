@@ -992,88 +992,143 @@ def dashboard():
                 smartstore_data = {}
         
         if smartstore_data:
-            # 탭: 신규관심고객 / 구매비중
-            tab1, tab2 = st.tabs(["📌 신규 관심고객", "📊 구매비중 변화"])
+            # 신규관심고객과 구매비중을 같은 화면에 표시
+            st.subheader("신규 관심고객 유입 현황")
             
-            with tab1:
-                st.subheader("신규 관심고객 유입 현황")
-                
-                # 월/주차 선택
-                col1, col2 = st.columns(2)
-                with col1:
-                    data_type = st.radio("데이터 종류", ["월별", "주차별"], key="ss_interest_type")
-                with col2:
-                    if data_type == "월별":
-                        all_months = list(reversed(list(smartstore_data["신규관심고객"]["월별"].keys())))
-                        selected = st.selectbox("월 선택", all_months, key="ss_interest_month")
-                        display_data = smartstore_data["신규관심고객"]["월별"].get(selected, {})
-                    else:
-                        all_weeks = sorted(smartstore_data["신규관심고객"]["주차별"].keys(), reverse=True)
-                        selected = st.selectbox("주차 선택", all_weeks, key="ss_interest_week")
-                        display_data = smartstore_data["신규관심고객"]["주차별"].get(selected, {})
-                
-                if display_data:
-                    # 테이블 생성
-                    rows = []
-                    for agency, data in display_data.items():
-                        row = {
-                            "거래선": agency,
-                            "누적관심고객수": f"{data.get('누적관심고객수', 0):,}",
-                            "신규관심고객수": f"{data.get('신규관심고객수', 0):,}",
-                        }
-                        if data_type == "월별":
-                            row["전월비(%)"] = f"{data.get('전월비', 0):.2f}%"
-                        else:
-                            row["전주비(%)"] = f"{data.get('전주비', 0):.2f}%"
-                        rows.append(row)
-                    
-                    df = pd.DataFrame(rows)
-                    st.dataframe(df, use_container_width=True, hide_index=True)
+            # 월/주차 선택
+            col1, col2 = st.columns(2)
+            with col1:
+                data_type = st.radio("데이터 종류", ["월별", "주차별"], key="ss_interest_type")
+            with col2:
+                if data_type == "월별":
+                    all_months = list(reversed(list(smartstore_data["신규관심고객"]["월별"].keys())))
+                    selected = st.selectbox("월 선택", all_months, key="ss_interest_month")
+                    display_data = smartstore_data["신규관심고객"]["월별"].get(selected, {})
+                else:
+                    all_weeks = sorted(smartstore_data["신규관심고객"]["주차별"].keys(), reverse=True)
+                    selected = st.selectbox("주차 선택", all_weeks, key="ss_interest_week")
+                    display_data = smartstore_data["신규관심고객"]["주차별"].get(selected, {})
             
-            with tab2:
-                st.subheader("구매비중 변화 (신규 vs 재구매)")
-                
-                # 월/주차 선택
-                col1, col2 = st.columns(2)
-                with col1:
-                    data_type = st.radio("데이터 종류", ["월별", "주차별"], key="ss_purchase_type")
-                with col2:
+            if display_data:
+                # 테이블 생성
+                rows = []
+                for agency, data in display_data.items():
+                    row = {
+                        "거래선": agency,
+                        "누적관심고객수": f"{data.get('누적관심고객수', 0):,}",
+                        "신규관심고객수": f"{data.get('신규관심고객수', 0):,}",
+                    }
                     if data_type == "월별":
-                        all_months = list(reversed(list(smartstore_data["구매비중"]["월별"].keys())))
-                        selected = st.selectbox("월 선택", all_months, key="ss_purchase_month")
-                        display_data = smartstore_data["구매비중"]["월별"].get(selected, {})
+                        row["전월비(%)"] = f"{data.get('전월비', 0):.2f}%"
                     else:
-                        all_weeks = sorted(smartstore_data["구매비중"]["주차별"].keys(), reverse=True)
-                        selected = st.selectbox("주차 선택", all_weeks, key="ss_purchase_week")
-                        display_data = smartstore_data["구매비중"]["주차별"].get(selected, {})
+                        row["전주비(%)"] = f"{data.get('전주비', 0):.2f}%"
+                    rows.append(row)
                 
-                if display_data:
-                    # 테이블 생성
-                    rows = []
-                    for agency, data in display_data.items():
-                        row = {
-                            "거래선": agency,
-                            "신규구매고객": f"{data.get('신규구매고객수', 0):,}",
-                            "신규구매비중(%)": f"{data.get('신규구매비중', 0):.2f}%",
-                            "재구매고객": f"{data.get('재구매고객수', 0):,}",
-                            "재구매비중(%)": f"{data.get('재구매비중', 0):.2f}%",
-                        }
-                        if data_type == "월별":
-                            row["신규전월비(%)"] = f"{data.get('신규구매전월비', 0):.2f}%"
-                            row["재전월비(%)"] = f"{data.get('재구매전월비', 0):.2f}%"
-                        else:
-                            row["신규전주비(%)"] = f"{data.get('신규구매전주비', 0):.2f}%"
-                            row["재전주비(%)"] = f"{data.get('재구매전주비', 0):.2f}%"
-                        rows.append(row)
-                    
-                    df = pd.DataFrame(rows)
-                    st.dataframe(df, use_container_width=True, hide_index=True)
+                df = pd.DataFrame(rows)
+                st.dataframe(df, use_container_width=True, hide_index=True)
+            
+            st.markdown("---")
+            st.subheader("구매비중 변화 (신규 vs 재구매)")
+            
+            # 월/주차 선택
+            col1, col2 = st.columns(2)
+            with col1:
+                data_type2 = st.radio("데이터 종류", ["월별", "주차별"], key="ss_purchase_type")
+            with col2:
+                if data_type2 == "월별":
+                    all_months = list(reversed(list(smartstore_data["구매비중"]["월별"].keys())))
+                    selected2 = st.selectbox("월 선택", all_months, key="ss_purchase_month")
+                    display_data2 = smartstore_data["구매비중"]["월별"].get(selected2, {})
+                else:
+                    all_weeks = sorted(smartstore_data["구매비중"]["주차별"].keys(), reverse=True)
+                    selected2 = st.selectbox("주차 선택", all_weeks, key="ss_purchase_week")
+                    display_data2 = smartstore_data["구매비중"]["주차별"].get(selected2, {})
+            
+            if display_data2:
+                # 테이블 생성
+                rows = []
+                for agency, data in display_data2.items():
+                    row = {
+                        "거래선": agency,
+                        "신규구매고객": f"{data.get('신규구매고객수', 0):,}",
+                        "신규구매비중(%)": f"{data.get('신규구매비중', 0):.2f}%",
+                        "재구매고객": f"{data.get('재구매고객수', 0):,}",
+                        "재구매비중(%)": f"{data.get('재구매비중', 0):.2f}%",
+                    }
+                    if data_type2 == "월별":
+                        row["신규전월비(%)"] = f"{data.get('신규구매전월비', 0):.2f}%"
+                        row["재전월비(%)"] = f"{data.get('재구매전월비', 0):.2f}%"
+                    else:
+                        row["신규전주비(%)"] = f"{data.get('신규구매전주비', 0):.2f}%"
+                        row["재전주비(%)"] = f"{data.get('재구매전주비', 0):.2f}%"
+                    rows.append(row)
+                
+                df = pd.DataFrame(rows)
+                st.dataframe(df, use_container_width=True, hide_index=True)
         else:
             st.warning("스마트스토어 데이터가 없습니다")
     elif current_page == "프리미엄":
         st.subheader("💎 프리미엄 제품별 실적")
         
-        # 프리미엄 데이터 로드
+        # STAR 데이터 로드
+        from executive_report import load_star_xlsx
+        star_data, star_errors = load_star_xlsx(Path(__file__).resolve().parent)
+        
+        if star_data:
+            st.markdown("### 🎯 STAR 기반 프리미엄 제품 S/I, S/O 실적")
+            
+            # 월 선택
+            months = sorted(set(key.split('_')[0] for key in star_data.keys() if key.split('_')[0]))
+            if months:
+                selected_month = st.selectbox("대상 월", months, key="premium_star_month")
+                
+                # 선택한 월의 데이터 필터링
+                month_data = {k: v for k, v in star_data.items() if k.startswith(f"{selected_month}_")}
+                
+                if month_data:
+                    # 품목별 집계
+                    product_summary = {}
+                    for key, data in month_data.items():
+                        parts = key.split('_')
+                        if len(parts) >= 4:
+                            product = parts[2]
+                            if product not in product_summary:
+                                product_summary[product] = {
+                                    'S/I_FCST': 0, 'S/I_실적': 0,
+                                    'S/O_FCST': 0, 'S/O_실적': 0,
+                                    'RTF_FCST': 0
+                                }
+                            for k, v in data.items():
+                                if k in product_summary[product]:
+                                    product_summary[product][k] += v if isinstance(v, (int, float)) else 0
+                    
+                    # 테이블 구성
+                    display_rows = []
+                    for product, metrics in sorted(product_summary.items()):
+                        si_rate = (metrics['S/I_실적'] / metrics['S/I_FCST'] * 100) if metrics['S/I_FCST'] > 0 else 0
+                        so_rate = (metrics['S/O_실적'] / metrics['S/O_FCST'] * 100) if metrics['S/O_FCST'] > 0 else 0
+                        
+                        display_rows.append({
+                            "제품": product,
+                            "S/I FCST": f"{metrics['S/I_FCST']:,.0f}",
+                            "S/I 실적": f"{metrics['S/I_실적']:,.0f}",
+                            "S/I 달성율(%)": f"{si_rate:.1f}",
+                            "S/O FCST": f"{metrics['S/O_FCST']:,.0f}",
+                            "S/O 실적": f"{metrics['S/O_실적']:,.0f}",
+                            "S/O 달성율(%)": f"{so_rate:.1f}",
+                            "RTF FCST": f"{metrics['RTF_FCST']:,.0f}"
+                        })
+                    
+                    st.dataframe(pd.DataFrame(display_rows), use_container_width=True, hide_index=True)
+            
+            st.markdown("---")
+        
+        if star_errors:
+            with st.expander("STAR 데이터 읽기 안내"):
+                for error in star_errors:
+                    st.warning(error)
+        
+        # 기존 프리미엄 데이터
         premium_data = {}
         premium_products = ['냉장고', '세탁기', '식기세척기', '정수기']
         
