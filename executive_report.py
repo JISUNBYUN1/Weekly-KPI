@@ -5,7 +5,6 @@ import re
 from pathlib import Path
 
 import pandas as pd
-import openpyxl
 
 AGENCIES = ["평강", "문성", "케이디엘", "하나로", "회산", "현성", "클릭나라"]
 CHANNELS = ("네이버스마트스토어", "쇼핑커넥트", "공동구매", "AI라이브")
@@ -29,61 +28,101 @@ h1 {font-size:2rem!important;letter-spacing:-.055em;font-weight:700!important;} 
 """
 
 
+STAR_METRIC_COLUMNS = {
+    'S/I_FCST': '◆_AP1_S/I FCST_예상',
+    'S/O_FCST': '◆_AP1_S/O FCST_예상',
+    'RTF_FCST': '◆_AP1_RTF_예상',
+}
+_STAR_MONTH_RE = re.compile(r"26Y(\d{2})M")
+_STAR_WEEK_RE = re.compile(r"26Y(\d{2})W([AB]?)")
+
+
 def load_star_xlsx(root):
-    """STAR.xlsx 파일 로드 및 분석 (header_row=7)"""
+    """STAR.xlsx 로드 (header=7). 반환 구조:
+    {"수량": {"월별": {"8월": {품목: {지표: 값}}}, "주차별": {"36주A": {품목: {...}}}},
+     "금액": {...동일 구조...}}
+    확인 결과 이 STAR 추출본은 '◆_매출'/'◆_실판매' 칼럼이 전 기간에 걸쳐
+    S/I·S/O FCST 칼럼과 100% 동일해 실질적으로 실적(실제값)이 아닌 계획(FCST) 값이
+    중복 기재된 것으로 판단, S/I FCST·S/O FCST·RTF FCST만 신뢰 가능한 값으로 사용합니다.
+    메져_구분(수량/금액)을 분리해 합산하며, 월은 행의 월(AB) 값을 그대로 사용해
+    분할 주차(월경계)도 올바른 월에 귀속시킵니다. 주차 라벨은 STAR 원본 고유 번호이며
+    PP3G 업무주차표(weeks_2026.json)의 W번호와 체계가 다를 수 있습니다."""
     try:
         star_path = Path(root) / "STAR.xlsx"
         if not star_path.exists():
             return {}, []
-        
-        # header=7로 읽기 (실제 헤더가 7번째 행)
+
         df = pd.read_excel(star_path, sheet_name=0, header=7)
-        
-        # 필요한 칼럼 확인
-        required_cols = ['기준품목', '월(AB)', '주(AB)']
+        required_cols = ['기준품목', '월(AB)', '주(AB)', '메져_구분']
         if not all(col in df.columns for col in required_cols):
-            return {}, [f"STAR.xlsx 필수 칼럼 부족"]
-        
-        # S/I, S/O, FCST, RTF 칼럼명
-        si_fcst_col = '◆_AP1_S/I FCST_예상'
-        si_actual_col = '◆_매출'  # S/I 실적
-        so_fcst_col = '◆_AP1_S/O FCST_예상'
-        so_actual_col = '◆_실판매_모바일/유통직판 포함'  # S/O 실적
-        rtf_fcst_col = '◆_AP1_RTF_예상'
-        
-        # 데이터 구성
-        result = {}
-        for idx, row in df.iterrows():
-            product = row.get('기준품목', '미분류')
-            month = str(row.get('월(AB)', '')).strip()
-            week = str(row.get('주(AB)', '')).strip()
-            
-            # NaN 또는 빈 값 제외
-            if not month or month == 'nan' or pd.isna(row.get('월(AB)')):
+            return {}, ["STAR.xlsx 필수 칼럼 부족"]
+
+        result = {"수량": {"월별": {}, "주차별": {}}, "금액": {"월별": {}, "주차별": {}}}
+
+        for _, row in df.iterrows():
+            product = row.get('기준품목')
+            if not isinstance(product, str) or not product.strip():
                 continue
-            if not week or week == 'nan' or pd.isna(row.get('주(AB)')):
+            measure_type = row.get('메져_구분')
+            if measure_type not in ("수량", "금액"):
                 continue
-            
-            key = f"{month}_{week}_{product}"
-            
-            # 값 추출 (NaN은 0으로 처리)
-            si_fcst = row.get(si_fcst_col, 0)
-            si_actual = row.get(si_actual_col, 0)
-            so_fcst = row.get(so_fcst_col, 0)
-            so_actual = row.get(so_actual_col, 0)
-            rtf_fcst = row.get(rtf_fcst_col, 0)
-            
-            result[key] = {
-                'S/I_FCST': si_fcst if pd.notna(si_fcst) else 0,
-                'S/I_실적': si_actual if pd.notna(si_actual) else 0,
-                'S/O_FCST': so_fcst if pd.notna(so_fcst) else 0,
-                'S/O_실적': so_actual if pd.notna(so_actual) else 0,
-                'RTF_FCST': rtf_fcst if pd.notna(rtf_fcst) else 0,
-            }
-        
+
+            m_match = _STAR_MONTH_RE.fullmatch(str(row.get('월(AB)', '')).strip())
+            w_match = _STAR_WEEK_RE.fullmatch(str(row.get('주(AB)', '')).strip())
+            if not m_match or not w_match:
+                continue
+            month_label = f"{int(m_match.group(1))}월"
+            week_label = f"{int(w_match.group(1))}주{w_match.group(2)}"
+
+            metrics = {}
+            for key, col in STAR_METRIC_COLUMNS.items():
+                value = row.get(col)
+                metrics[key] = value if number(value) else 0
+
+            bucket = result[measure_type]
+            for scope_key, label in (("월별", month_label), ("주차별", week_label)):
+                store = bucket[scope_key].setdefault(label, {})
+                entry = store.setdefault(product, {k: 0 for k in STAR_METRIC_COLUMNS})
+                for key, value in metrics.items():
+                    entry[key] += value
+
         return result, []
     except Exception as e:
         return {}, [f"STAR.xlsx 로드 오류: {str(e)}"]
+
+
+def build_star_display_rows(bucket, unit_label):
+    """{품목: 지표dict} -> 화면 표시용 행 리스트 (FCST 계획값만; 실적 칼럼 없음)"""
+    rows = []
+    for product, metrics in sorted(bucket.items()):
+        rows.append({
+            "품목": product,
+            f"S/I FCST({unit_label})": f"{metrics['S/I_FCST']:,.0f}",
+            f"S/O FCST({unit_label})": f"{metrics['S/O_FCST']:,.0f}",
+            f"RTF FCST({unit_label})": f"{metrics['RTF_FCST']:,.0f}",
+        })
+    return rows
+
+
+def star_week_sort_key(label):
+    match = re.fullmatch(r"(\d{1,2})주([AB]?)", label or "")
+    return (int(match.group(1)), match.group(2)) if match else (-1, "")
+
+
+def render_star_section(st, star_data, scope_type, scope_value):
+    """수량/금액 두 표를 함께 렌더링. 표시할 데이터가 있었으면 True 반환."""
+    st.caption("⚠️ 이 STAR 추출본은 '실적' 칼럼이 FCST와 동일해 계획(FCST) 값만 신뢰할 수 있습니다. "
+               "실제 실적·달성율은 실적이 분리된 STAR 추출본이 확보되면 반영합니다.")
+    shown_any = False
+    for unit_label in ("수량", "금액"):
+        bucket = star_data.get(unit_label, {}).get(scope_type, {}).get(scope_value, {})
+        st.markdown(f"**{unit_label} 기준 (FCST)**")
+        if bucket:
+            st.dataframe(pd.DataFrame(build_star_display_rows(bucket, unit_label)), use_container_width=True, hide_index=True)
+            shown_any = True
+        else:
+            st.caption("해당 조건에 데이터가 없습니다.")
+    return shown_any
 
 
 def read_json(root, filename, errors, default=None):
@@ -225,52 +264,20 @@ def render_month_week_analysis(st, root):
         display.append(item)
     st.dataframe(pd.DataFrame(display), use_container_width=True, hide_index=True)
     
-    # 품목별 실적 추가
+    # 품목별 실적 추가 (STAR 기반, 수량/금액 모두 표시)
     if star_data:
         st.subheader("품목별 S/I, S/O 실적 분석 (RAW 데이터)")
-        
-        # 선택한 월/주차의 STAR 데이터 필터링
-        product_summary = {}
-        for key, data in star_data.items():
-            parts = key.split('_')
-            if len(parts) >= 4:
-                key_month = parts[0]
-                key_week = parts[1]
-                product = parts[2]
-                
-                # 월간 또는 주간 필터
-                if (monthly and key_month == month) or (not monthly and key_week == selected_week and key_month == month):
-                    if product not in product_summary:
-                        product_summary[product] = {
-                            'S/I_FCST': 0, 'S/I_실적': 0,
-                            'S/O_FCST': 0, 'S/O_실적': 0,
-                            'RTF_FCST': 0
-                        }
-                    for k, v in data.items():
-                        if k in product_summary[product]:
-                            product_summary[product][k] += v if number(v) else 0
-        
-        if product_summary:
-            # 테이블 구성
-            display_rows = []
-            for product, metrics in sorted(product_summary.items()):
-                si_rate = (metrics['S/I_실적'] / metrics['S/I_FCST'] * 100) if metrics['S/I_FCST'] > 0 else 0
-                so_rate = (metrics['S/O_실적'] / metrics['S/O_FCST'] * 100) if metrics['S/O_FCST'] > 0 else 0
-                
-                display_rows.append({
-                    "품목": product,
-                    "S/I FCST": f"{metrics['S/I_FCST']:,.0f}",
-                    "S/I 실적": f"{metrics['S/I_실적']:,.0f}",
-                    "S/I 달성율(%)": f"{si_rate:.1f}",
-                    "S/O FCST": f"{metrics['S/O_FCST']:,.0f}",
-                    "S/O 실적": f"{metrics['S/O_실적']:,.0f}",
-                    "S/O 달성율(%)": f"{so_rate:.1f}",
-                    "RTF FCST": f"{metrics['RTF_FCST']:,.0f}"
-                })
-            
-            st.dataframe(pd.DataFrame(display_rows), use_container_width=True, hide_index=True)
+        if monthly:
+            render_star_section(st, star_data, "월별", month)
         else:
-            st.info(f"{scope}에 품목별 실적 데이터가 없습니다.")
+            month_bucket_qty = star_data.get("수량", {}).get("월별", {}).get(month, {})
+            month_bucket_amt = star_data.get("금액", {}).get("월별", {}).get(month, {})
+            if month_bucket_qty or month_bucket_amt:
+                st.caption("STAR 원본은 자체 주차 번호 체계를 사용해 PP3G 업무주차(W번호)와 월경계 주차에서 1:1로 정확히 대응하지 않을 수 있습니다. "
+                           "주차 선택 시에도 해당 월 전체 STAR 실적을 표시합니다. 주차 단위 STAR 실적은 '품목별 실적' 메뉴에서 STAR 자체 주차로 확인하세요.")
+                render_star_section(st, star_data, "월별", month)
+            else:
+                st.info(f"{month}에 품목별 STAR 실적 데이터가 없습니다.")
 
     st.subheader("월간·주간 활동 분석")
     st.caption("활동과 실적이 같은 기간에 기록됐다는 관찰을 보여줍니다. 활동이 실적을 만들었다고 단정하지 않습니다.")
@@ -315,64 +322,40 @@ def collect_product_data(root):
 def render_product_performance(st, root):
     data, errors = collect_product_data(root)
     star_data, star_errors = load_star_xlsx(root)
-    
+
     st.subheader("품목별 실적")
-    
-    # STAR 데이터 있으면 먼저 표시
+
+    # STAR 데이터 있으면 먼저 표시 (수량 + 금액, 월별/주차별)
     if star_data:
-        st.markdown("### STAR 기반 실적 (RAW 데이터)")
-        
-        # 월 선택
-        months = sorted(set(key.split('_')[0] for key in star_data.keys() if key.split('_')[0]))
-        if months:
-            selected_month = st.selectbox("대상 월", months, key="product_star_month")
-            
-            # 선택한 월의 데이터 필터링
-            month_data = {k: v for k, v in star_data.items() if k.startswith(f"{selected_month}_")}
-            
-            if month_data:
-                # 품목별 집계
-                product_summary = {}
-                for key, data_item in month_data.items():
-                    parts = key.split('_')
-                    if len(parts) >= 4:
-                        product = parts[2]
-                        if product not in product_summary:
-                            product_summary[product] = {
-                                'S/I_FCST': 0, 'S/I_실적': 0,
-                                'S/O_FCST': 0, 'S/O_실적': 0,
-                                'RTF_FCST': 0
-                            }
-                        for k, v in data_item.items():
-                            if k in product_summary[product]:
-                                product_summary[product][k] += v if number(v) else 0
-                
-                # 테이블 구성
-                display_rows = []
-                for product, metrics in sorted(product_summary.items()):
-                    si_rate = (metrics['S/I_실적'] / metrics['S/I_FCST'] * 100) if metrics['S/I_FCST'] > 0 else 0
-                    so_rate = (metrics['S/O_실적'] / metrics['S/O_FCST'] * 100) if metrics['S/O_FCST'] > 0 else 0
-                    
-                    display_rows.append({
-                        "품목": product,
-                        "S/I FCST": f"{metrics['S/I_FCST']:,.0f}",
-                        "S/I 실적": f"{metrics['S/I_실적']:,.0f}",
-                        "S/I 달성율(%)": f"{si_rate:.1f}",
-                        "S/O FCST": f"{metrics['S/O_FCST']:,.0f}",
-                        "S/O 실적": f"{metrics['S/O_실적']:,.0f}",
-                        "S/O 달성율(%)": f"{so_rate:.1f}",
-                        "RTF FCST": f"{metrics['RTF_FCST']:,.0f}"
-                    })
-                
-                st.dataframe(pd.DataFrame(display_rows), use_container_width=True, hide_index=True)
-        
+        st.markdown("### STAR 기반 실적 (RAW 데이터: S/I·S/O FCST·실적·RTF·달성율)")
+        scope_type = st.radio("데이터 종류", ["월별", "주차별"], key="product_star_scope", horizontal=True)
+        if scope_type == "월별":
+            keys = sorted(
+                set(star_data.get("수량", {}).get("월별", {}).keys()) | set(star_data.get("금액", {}).get("월별", {}).keys()),
+                key=lambda m: int(m.replace("월", "")))
+        else:
+            keys = sorted(
+                set(star_data.get("수량", {}).get("주차별", {}).keys()) | set(star_data.get("금액", {}).get("주차별", {}).keys()),
+                key=star_week_sort_key)
+            st.caption("STAR 원본 자체 주차 번호이며, PP3G 업무주차표(W번호)와 월경계 주차에서 다를 수 있습니다.")
+
+        if keys:
+            selected_scope = st.selectbox("대상 월" if scope_type == "월별" else "대상 주차", keys, key="product_star_scope_value")
+            render_star_section(st, star_data, scope_type, selected_scope)
+        else:
+            st.info("STAR 품목별 실적 데이터가 없습니다.")
+
         if star_errors:
             with st.expander("STAR 데이터 읽기 안내"):
                 for error in star_errors:
                     st.error(error)
-        
+
         st.markdown("---")
-    
+    elif star_errors:
+        with st.expander("STAR 데이터 읽기 안내"):
+            for error in star_errors:
+                st.error(error)
+
     # 채널별 실적
     st.markdown("### 채널별 실적")
     if not data:

@@ -10,7 +10,7 @@ from pathlib import Path
 
 st.set_page_config(page_title="PP3G | Marketing Performance", page_icon="▥", layout="wide")
 
-from executive_report import STYLE, render_month_week_analysis, render_product_performance
+from executive_report import STYLE, render_month_week_analysis, render_product_performance, load_star_xlsx, render_star_section, star_week_sort_key
 
 st.markdown(STYLE, unsafe_allow_html=True)
 
@@ -1071,55 +1071,27 @@ def dashboard():
         st.subheader("💎 프리미엄 제품별 실적")
         
         # STAR 데이터 로드
-        from executive_report import load_star_xlsx
         star_data, star_errors = load_star_xlsx(Path(__file__).resolve().parent)
         
         if star_data:
-            st.markdown("### 🎯 STAR 기반 프리미엄 제품 S/I, S/O 실적")
+            st.markdown("### 🎯 STAR 기반 프리미엄 제품 S/I, S/O FCST 실적")
             
-            # 월 선택
-            months = sorted(set(key.split('_')[0] for key in star_data.keys() if key.split('_')[0]))
-            if months:
-                selected_month = st.selectbox("대상 월", months, key="premium_star_month")
-                
-                # 선택한 월의 데이터 필터링
-                month_data = {k: v for k, v in star_data.items() if k.startswith(f"{selected_month}_")}
-                
-                if month_data:
-                    # 품목별 집계
-                    product_summary = {}
-                    for key, data in month_data.items():
-                        parts = key.split('_')
-                        if len(parts) >= 4:
-                            product = parts[2]
-                            if product not in product_summary:
-                                product_summary[product] = {
-                                    'S/I_FCST': 0, 'S/I_실적': 0,
-                                    'S/O_FCST': 0, 'S/O_실적': 0,
-                                    'RTF_FCST': 0
-                                }
-                            for k, v in data.items():
-                                if k in product_summary[product]:
-                                    product_summary[product][k] += v if isinstance(v, (int, float)) else 0
-                    
-                    # 테이블 구성
-                    display_rows = []
-                    for product, metrics in sorted(product_summary.items()):
-                        si_rate = (metrics['S/I_실적'] / metrics['S/I_FCST'] * 100) if metrics['S/I_FCST'] > 0 else 0
-                        so_rate = (metrics['S/O_실적'] / metrics['S/O_FCST'] * 100) if metrics['S/O_FCST'] > 0 else 0
-                        
-                        display_rows.append({
-                            "제품": product,
-                            "S/I FCST": f"{metrics['S/I_FCST']:,.0f}",
-                            "S/I 실적": f"{metrics['S/I_실적']:,.0f}",
-                            "S/I 달성율(%)": f"{si_rate:.1f}",
-                            "S/O FCST": f"{metrics['S/O_FCST']:,.0f}",
-                            "S/O 실적": f"{metrics['S/O_실적']:,.0f}",
-                            "S/O 달성율(%)": f"{so_rate:.1f}",
-                            "RTF FCST": f"{metrics['RTF_FCST']:,.0f}"
-                        })
-                    
-                    st.dataframe(pd.DataFrame(display_rows), use_container_width=True, hide_index=True)
+            scope_type = st.radio("데이터 종류", ["월별", "주차별"], key="premium_star_scope", horizontal=True)
+            if scope_type == "월별":
+                keys = sorted(
+                    set(star_data.get("수량", {}).get("월별", {}).keys()) | set(star_data.get("금액", {}).get("월별", {}).keys()),
+                    key=lambda m: int(m.replace("월", "")))
+            else:
+                keys = sorted(
+                    set(star_data.get("수량", {}).get("주차별", {}).keys()) | set(star_data.get("금액", {}).get("주차별", {}).keys()),
+                    key=star_week_sort_key)
+                st.caption("STAR 원본 자체 주차 번호이며, PP3G 업무주차표(W번호)와 월경계 주차에서 다를 수 있습니다.")
+            
+            if keys:
+                selected_scope = st.selectbox("대상 월" if scope_type == "월별" else "대상 주차", keys, key="premium_star_scope_value")
+                render_star_section(st, star_data, scope_type, selected_scope)
+            else:
+                st.info("STAR 품목별 실적 데이터가 없습니다.")
             
             st.markdown("---")
         
