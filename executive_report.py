@@ -30,22 +30,25 @@ h1 {font-size:2rem!important;letter-spacing:-.055em;font-weight:700!important;} 
 
 
 def load_star_xlsx(root):
-    """STAR.xlsx 파일 로드 및 분석"""
+    """STAR.xlsx 또는 STAR.csv 파일 로드 및 분석"""
     try:
+        # XLSX 먼저 시도
         star_path = Path(root) / "STAR.xlsx"
+        if not star_path.exists():
+            # CSV 시도
+            star_path = Path(root) / "STAR.csv"
+        
         if not star_path.exists():
             return {}, []
         
-        # openpyxl 오류 방지 - 다른 engine 사용
+        # 파일 형식에 따라 읽기
         try:
-            df = pd.read_excel(star_path, sheet_name=0, engine='openpyxl')
-        except:
-            # openpyxl 실패시 다른 engine 시도
-            try:
-                df = pd.read_excel(star_path, sheet_name=0, engine='xlrd')
-            except:
-                # 마지막 시도 - 기본 engine
+            if str(star_path).endswith('.csv'):
+                df = pd.read_csv(star_path, encoding='utf-8-sig')
+            else:
                 df = pd.read_excel(star_path, sheet_name=0)
+        except Exception as e:
+            return {}, [f"STAR 파일 읽기 오류: {str(e)}"]
         
         # 필요한 컬럼 확인
         required_cols = ['영업그룹', '기준품목', '주', '월', '메져_구분']
@@ -177,6 +180,9 @@ def render_month_week_analysis(st, root):
     smart = read_json(root, "smartstore_data.json", errors)
     weekly = read_json(root, "weekly_data.json", errors, [])
     calendar = read_json(root, "weeks_2026.json", errors)
+    star_data, star_errors = load_star_xlsx(root)
+    errors.extend(star_errors)
+    
     if not isinstance(weekly, list):
         weekly = []; errors.append("weekly_data.json 형식을 확인해주세요.")
     months = [f"{m}월" for m in range(12, 0, -1)]
@@ -209,6 +215,53 @@ def render_month_week_analysis(st, root):
         item["요약"] = " ".join(observations[:2]) if observations else "제공된 지표가 없습니다."
         display.append(item)
     st.dataframe(pd.DataFrame(display), use_container_width=True, hide_index=True)
+    
+    # 품목별 실적 추가
+    if star_data:
+        st.subheader("품목별 S/I, S/O 실적 분석 (RAW 데이터)")
+        
+        # 선택한 월/주차의 STAR 데이터 필터링
+        product_summary = {}
+        for key, data in star_data.items():
+            parts = key.split('_')
+            if len(parts) >= 4:
+                key_month = parts[0]
+                key_week = parts[1]
+                product = parts[2]
+                
+                # 월간 또는 주간 필터
+                if (monthly and key_month == month) or (not monthly and key_week == selected_week and key_month == month):
+                    if product not in product_summary:
+                        product_summary[product] = {
+                            'S/I_FCST': 0, 'S/I_실적': 0,
+                            'S/O_FCST': 0, 'S/O_실적': 0,
+                            'RTF_FCST': 0
+                        }
+                    for k, v in data.items():
+                        if k in product_summary[product]:
+                            product_summary[product][k] += v if number(v) else 0
+        
+        if product_summary:
+            # 테이블 구성
+            display_rows = []
+            for product, metrics in sorted(product_summary.items()):
+                si_rate = (metrics['S/I_실적'] / metrics['S/I_FCST'] * 100) if metrics['S/I_FCST'] > 0 else 0
+                so_rate = (metrics['S/O_실적'] / metrics['S/O_FCST'] * 100) if metrics['S/O_FCST'] > 0 else 0
+                
+                display_rows.append({
+                    "품목": product,
+                    "S/I FCST": f"{metrics['S/I_FCST']:,.0f}",
+                    "S/I 실적": f"{metrics['S/I_실적']:,.0f}",
+                    "S/I 달성율(%)": f"{si_rate:.1f}",
+                    "S/O FCST": f"{metrics['S/O_FCST']:,.0f}",
+                    "S/O 실적": f"{metrics['S/O_실적']:,.0f}",
+                    "S/O 달성율(%)": f"{so_rate:.1f}",
+                    "RTF FCST": f"{metrics['RTF_FCST']:,.0f}"
+                })
+            
+            st.dataframe(pd.DataFrame(display_rows), use_container_width=True, hide_index=True)
+        else:
+            st.info(f"{scope}에 품목별 실적 데이터가 없습니다.")
 
     st.subheader("월간·주간 활동 분석")
     st.caption("활동과 실적이 같은 기간에 기록됐다는 관찰을 보여줍니다. 활동이 실적을 만들었다고 단정하지 않습니다.")
