@@ -49,7 +49,9 @@ def _star_status(week_num):
 
 
 def load_star_xlsx(root):
-    """STAR.xlsx 로드 (header=7). 반환 구조:
+    """STAR.csv(우선) 또는 STAR.xlsx(대체)를 로드. header=7 기준 원본 칼럼 구조.
+    xlsx는 Git 업로드 과정에서 바이너리가 손상되는 사례가 있어 CSV를 우선 사용합니다.
+    반환 구조:
     {"수량": {
         "월별": {"8월": {"실적": {품목: {S/I,S/O,RTF}}, "FCST": {품목: {...}}}},
         "주차별": {"37주": {"status": "실적", "products": {품목: {...}}}, "38주": {"status": "FCST", ...}}
@@ -58,14 +60,19 @@ def load_star_xlsx(root):
     분할 주차(월경계)도 올바른 월에 귀속시킵니다. 주차 라벨은 STAR 원본 고유 번호이며
     PP3G 업무주차표(weeks_2026.json)의 W번호와 체계가 다를 수 있습니다."""
     try:
-        star_path = Path(root) / "STAR.xlsx"
-        if not star_path.exists():
+        csv_path = Path(root) / "STAR.csv"
+        xlsx_path = Path(root) / "STAR.xlsx"
+
+        if csv_path.exists():
+            df = pd.read_csv(csv_path, encoding="utf-8-sig")
+        elif xlsx_path.exists():
+            df = pd.read_excel(xlsx_path, sheet_name=0, header=7, engine='openpyxl')
+        else:
             return {}, []
 
-        df = pd.read_excel(star_path, sheet_name=0, header=7, engine='openpyxl')
         required_cols = ['기준품목', '월(AB)', '주(AB)', '메져_구분']
         if not all(col in df.columns for col in required_cols):
-            return {}, ["STAR.xlsx 필수 칼럼 부족"]
+            return {}, ["STAR 파일 필수 칼럼 부족"]
 
         result = {"수량": {"월별": {}, "주차별": {}}, "금액": {"월별": {}, "주차별": {}}}
 
@@ -412,3 +419,4 @@ def render_product_performance(st, root):
     st.line_chart(pd.DataFrame(trend).set_index("월"), color="#164c96", height=300)
     st.caption("현재 원본은 채널별·월별 품목 실적입니다. 주차별 품목 실적 파일이 추가되면 같은 화면에 주간 추이를 연결합니다.")
     for error in errors: st.error(error)
+
