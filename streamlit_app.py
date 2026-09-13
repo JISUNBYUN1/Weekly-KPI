@@ -10,7 +10,7 @@ from pathlib import Path
 
 st.set_page_config(page_title="PP3G | Marketing Performance", page_icon="▥", layout="wide")
 
-from executive_report import STYLE, render_month_week_analysis, render_product_performance, load_star_xlsx, render_star_month_section, render_star_week_section, star_week_sort_key
+from executive_report import STYLE, render_month_week_analysis, render_product_performance, load_star_xlsx, render_star_section, star_week_sort_key, star_month_sort_key
 
 st.markdown(STYLE, unsafe_allow_html=True)
 
@@ -1080,19 +1080,25 @@ def dashboard():
             if scope_type == "월별":
                 keys = sorted(
                     set(star_data.get("수량", {}).get("월별", {}).keys()) | set(star_data.get("금액", {}).get("월별", {}).keys()),
-                    key=lambda m: int(m.replace("월", "")))
+                    key=star_month_sort_key, reverse=True)
             else:
                 keys = sorted(
                     set(star_data.get("수량", {}).get("주차별", {}).keys()) | set(star_data.get("금액", {}).get("주차별", {}).keys()),
-                    key=star_week_sort_key)
+                    key=star_week_sort_key, reverse=True)
                 st.caption("STAR 원본 자체 주차 번호이며, PP3G 업무주차표(W번호)와 월경계 주차에서 다를 수 있습니다.")
             
             if keys:
                 selected_scope = st.selectbox("대상 월" if scope_type == "월별" else "대상 주차", keys, key="premium_star_scope_value")
                 if scope_type == "월별":
-                    render_star_month_section(st, star_data, selected_scope)
+                    month_num = star_month_sort_key(selected_scope)
+                    prev_scope = f"{month_num - 1}월" if month_num > 1 else None
                 else:
-                    render_star_week_section(st, star_data, selected_scope)
+                    weeks_sorted_asc = sorted(
+                        set(star_data.get("수량", {}).get("주차별", {}).keys()) | set(star_data.get("금액", {}).get("주차별", {}).keys()),
+                        key=star_week_sort_key)
+                    idx = weeks_sorted_asc.index(selected_scope) if selected_scope in weeks_sorted_asc else -1
+                    prev_scope = weeks_sorted_asc[idx - 1] if idx > 0 else None
+                render_star_section(st, star_data, scope_type, selected_scope, prev_scope)
             else:
                 st.info("STAR 품목별 실적 데이터가 없습니다.")
             

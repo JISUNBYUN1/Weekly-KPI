@@ -28,6 +28,8 @@ h1 {font-size:2rem!important;letter-spacing:-.055em;font-weight:700!important;} 
 """
 
 
+
+
 STAR_METRIC_COLUMNS = {
     'S/I': '◆_AP1_S/I FCST_예상',
     'S/O': '◆_AP1_S/O FCST_예상',
@@ -49,16 +51,18 @@ def _star_status(week_num):
 
 
 def load_star_xlsx(root):
-    """STAR.csv(우선) 또는 STAR.xlsx(대체)를 로드. header=7 기준 원본 칼럼 구조.
-    xlsx는 Git 업로드 과정에서 바이너리가 손상되는 사례가 있어 CSV를 우선 사용합니다.
-    반환 구조:
+    """STAR.csv(우선) 또는 STAR.xlsx(대체) 로드. 반환 구조:
     {"수량": {
-        "월별": {"8월": {"실적": {품목: {S/I,S/O,RTF}}, "FCST": {품목: {...}}}},
-        "주차별": {"37주": {"status": "실적", "products": {품목: {...}}}, "38주": {"status": "FCST", ...}}
+        "월별": {"8월": {"실적": {"total":{품목:{S/I,S/O,RTF}}, "channel":{품목:{채널:{...}}}},
+                        "FCST": {...동일 구조...}}},
+        "주차별": {"37주": {"status":"실적", "month":"9월",
+                           "total":{품목:{...}}, "channel":{품목:{채널:{...}}}}}
      }, "금액": {...동일 구조...}}
-    메져_구분(수량/금액)을 분리해 합산하며, 월은 행의 월(AB) 값을 그대로 사용해
-    분할 주차(월경계)도 올바른 월에 귀속시킵니다. 주차 라벨은 STAR 원본 고유 번호이며
-    PP3G 업무주차표(weeks_2026.json)의 W번호와 체계가 다를 수 있습니다."""
+    채널은 STAR 원본의 '영업그룹'(SOP/종합몰/홈쇼핑/쿠팡)이며, 거래선(평강 등) 정보는
+    STAR 원본에 없어 채널 단위로만 분해합니다. 메져_구분(수량/금액)을 분리해 합산하며,
+    월은 행의 월(AB) 값을 그대로 사용해 분할 주차(월경계)도 올바른 월에 귀속시킵니다.
+    주차 라벨은 STAR 원본 고유 번호이며 PP3G 업무주차표(weeks_2026.json)의 W번호와
+    체계가 다를 수 있습니다."""
     try:
         csv_path = Path(root) / "STAR.csv"
         xlsx_path = Path(root) / "STAR.xlsx"
@@ -83,6 +87,8 @@ def load_star_xlsx(root):
             measure_type = row.get('메져_구분')
             if measure_type not in ("수량", "금액"):
                 continue
+            channel = row.get('영업그룹')
+            channel = channel if isinstance(channel, str) and channel.strip() else "미분류"
 
             m_match = _STAR_MONTH_RE.fullmatch(str(row.get('월(AB)', '')).strip())
             w_match = _STAR_WEEK_RE.fullmatch(str(row.get('주(AB)', '')).strip())
@@ -100,32 +106,27 @@ def load_star_xlsx(root):
 
             bucket = result[measure_type]
 
-            month_store = bucket["월별"].setdefault(month_label, {"실적": {}, "FCST": {}})[status]
-            entry = month_store.setdefault(product, {k: 0 for k in STAR_METRIC_COLUMNS})
+            month_store = bucket["월별"].setdefault(
+                month_label, {"실적": {"total": {}, "channel": {}}, "FCST": {"total": {}, "channel": {}}})[status]
+            entry = month_store["total"].setdefault(product, {k: 0 for k in STAR_METRIC_COLUMNS})
             for key, value in metrics.items():
                 entry[key] += value
+            ch_entry = month_store["channel"].setdefault(product, {}).setdefault(channel, {k: 0 for k in STAR_METRIC_COLUMNS})
+            for key, value in metrics.items():
+                ch_entry[key] += value
 
-            week_store = bucket["주차별"].setdefault(week_label, {"status": status, "products": {}})
-            entry = week_store["products"].setdefault(product, {k: 0 for k in STAR_METRIC_COLUMNS})
+            week_store = bucket["주차별"].setdefault(
+                week_label, {"status": status, "month": month_label, "total": {}, "channel": {}})
+            entry = week_store["total"].setdefault(product, {k: 0 for k in STAR_METRIC_COLUMNS})
             for key, value in metrics.items():
                 entry[key] += value
+            ch_entry = week_store["channel"].setdefault(product, {}).setdefault(channel, {k: 0 for k in STAR_METRIC_COLUMNS})
+            for key, value in metrics.items():
+                ch_entry[key] += value
 
         return result, []
     except Exception as e:
-        return {}, [f"STAR.xlsx 로드 오류: {str(e)}"]
-
-
-def build_star_display_rows(bucket, unit_label, status_label):
-    """{품목: 지표dict} -> 화면 표시용 행 리스트 (status_label: '실적' 또는 'FCST')"""
-    rows = []
-    for product, metrics in sorted(bucket.items()):
-        rows.append({
-            "품목": product,
-            f"S/I {status_label}({unit_label})": f"{metrics['S/I']:,.0f}",
-            f"S/O {status_label}({unit_label})": f"{metrics['S/O']:,.0f}",
-            f"RTF {status_label}({unit_label})": f"{metrics['RTF']:,.0f}",
-        })
-    return rows
+        return {}, [f"STAR 파일 로드 오류: {str(e)}"]
 
 
 def star_week_sort_key(label):
@@ -133,41 +134,160 @@ def star_week_sort_key(label):
     return (int(match.group(1)), match.group(2)) if match else (-1, "")
 
 
-def render_star_month_section(st, star_data, month_label):
-    """월별 화면: 실적(마감분)과 FCST(잔여기간)를 있는 만큼만 나눠서 표시."""
-    st.caption(f"⚠️ STAR 원본은 {STAR_ACTUAL_CUTOFF_WEEK}주(9/12)까지는 실적으로 확정되고, "
-               f"그 이후 주차는 아직 지나지 않아 FCST(예측)로 표시됩니다.")
-    shown_any = False
-    for unit_label in ("수량", "금액"):
-        month_bucket = star_data.get(unit_label, {}).get("월별", {}).get(month_label, {})
-        for status_label in ("실적", "FCST"):
-            data_bucket = month_bucket.get(status_label, {})
-            if data_bucket:
-                st.markdown(f"**{unit_label} 기준 — {status_label}**")
-                st.dataframe(pd.DataFrame(build_star_display_rows(data_bucket, unit_label, status_label)),
-                             use_container_width=True, hide_index=True)
-                shown_any = True
-    if not shown_any:
-        st.info(f"{month_label}에 품목별 STAR 실적 데이터가 없습니다.")
-    return shown_any
+def star_month_sort_key(label):
+    match = re.fullmatch(r"(\d{1,2})월", label or "")
+    return int(match.group(1)) if match else -1
 
 
-def render_star_week_section(st, star_data, week_label):
-    """주차별 화면: 해당 주차의 status(실적/FCST) 하나로 표시."""
-    shown_any = False
-    for unit_label in ("수량", "금액"):
-        week_bucket = star_data.get(unit_label, {}).get("주차별", {}).get(week_label, {})
-        status_label = week_bucket.get("status", "FCST")
-        products = week_bucket.get("products", {})
-        st.markdown(f"**{unit_label} 기준 — {status_label}**")
-        if products:
-            st.dataframe(pd.DataFrame(build_star_display_rows(products, unit_label, status_label)),
-                         use_container_width=True, hide_index=True)
-            shown_any = True
+def _combined_month_total(star_data, unit, month_label):
+    """해당 월의 실적+FCST 합산 품목별 total (월 비교용)."""
+    bucket = star_data.get(unit, {}).get("월별", {}).get(month_label, {})
+    combined = {}
+    for status in ("실적", "FCST"):
+        for product, metrics in bucket.get(status, {}).get("total", {}).items():
+            entry = combined.setdefault(product, {k: 0 for k in STAR_METRIC_COLUMNS})
+            for k, v in metrics.items():
+                entry[k] += v
+    return combined
+
+
+def _pct_change(current, previous):
+    if not number(current) or not number(previous) or previous == 0:
+        return None
+    return (current - previous) / previous * 100
+
+
+def _fmt_pct(value):
+    return f"{value:+.1f}" if number(value) else "N/A"
+
+
+def _fmt_amount_100m(value):
+    """원 단위 금액 값을 억원 단위로 변환해 표시."""
+    return f"{value / 1e8:,.1f}" if number(value) else "0.0"
+
+
+def build_star_combined_table(star_data, scope_type, scope_value, prev_scope_value):
+    """S/I·S/O를 그룹 헤더로 묶은 표: 수량|RTF비|금액(억원)|전기간비|전년비 (S/I),
+    수량|금액(억원)|전기간비|전년비 (S/O). 전년비는 2025년 STAR 데이터가 없어 'N/A'로 표시."""
+    if scope_type == "월별":
+        qty = _combined_month_total(star_data, "수량", scope_value)
+        amt = _combined_month_total(star_data, "금액", scope_value)
+        qty_prev = _combined_month_total(star_data, "수량", prev_scope_value) if prev_scope_value else {}
+        amt_prev = _combined_month_total(star_data, "금액", prev_scope_value) if prev_scope_value else {}
+        change_label = "전월비(%)"
+    else:
+        qty = star_data.get("수량", {}).get("주차별", {}).get(scope_value, {}).get("total", {})
+        amt = star_data.get("금액", {}).get("주차별", {}).get(scope_value, {}).get("total", {})
+        qty_prev = star_data.get("수량", {}).get("주차별", {}).get(prev_scope_value, {}).get("total", {}) if prev_scope_value else {}
+        amt_prev = star_data.get("금액", {}).get("주차별", {}).get(prev_scope_value, {}).get("total", {}) if prev_scope_value else {}
+        change_label = "전주비(%)"
+
+    products = sorted(set(qty) | set(amt))
+    if not products:
+        return None
+
+    rows = []
+    for product in products:
+        q = qty.get(product, {k: 0 for k in STAR_METRIC_COLUMNS})
+        a = amt.get(product, {k: 0 for k in STAR_METRIC_COLUMNS})
+        qp = qty_prev.get(product, {})
+        ap = amt_prev.get(product, {})
+        rtf_rate = (q['RTF'] / q['S/I'] * 100) if q['S/I'] else None
+        si_qty_chg = _pct_change(q['S/I'], qp.get('S/I'))
+        si_amt_chg = _pct_change(a['S/I'], ap.get('S/I'))
+        so_qty_chg = _pct_change(q['S/O'], qp.get('S/O'))
+        so_amt_chg = _pct_change(a['S/O'], ap.get('S/O'))
+        rows.append({
+            ("품목", ""): product,
+            ("S/I", "수량"): f"{q['S/I']:,.0f}",
+            ("S/I", "RTF비(%)"): f"{rtf_rate:.1f}" if number(rtf_rate) else "N/A",
+            ("S/I", "금액(억원)"): _fmt_amount_100m(a['S/I']),
+            ("S/I", change_label): _fmt_pct(si_qty_chg) if si_qty_chg is not None else _fmt_pct(si_amt_chg),
+            ("S/I", "전년비(%)"): "N/A",
+            ("S/O", "수량"): f"{q['S/O']:,.0f}",
+            ("S/O", "금액(억원)"): _fmt_amount_100m(a['S/O']),
+            ("S/O", change_label): _fmt_pct(so_qty_chg) if so_qty_chg is not None else _fmt_pct(so_amt_chg),
+            ("S/O", "전년비(%)"): "N/A",
+        })
+    df = pd.DataFrame(rows)
+    df.columns = pd.MultiIndex.from_tuples(df.columns)
+    return df
+
+
+def build_star_channel_table(star_data, scope_type, scope_value, product):
+    """선택한 품목의 채널(SOP/종합몰/홈쇼핑/쿠팡)별 S/I·S/O 수량/금액."""
+    if scope_type == "월별":
+        qty_channel = {}
+        amt_channel = {}
+        for status in ("실적", "FCST"):
+            qty_bucket = star_data.get("수량", {}).get("월별", {}).get(scope_value, {}).get(status, {}).get("channel", {}).get(product, {})
+            amt_bucket = star_data.get("금액", {}).get("월별", {}).get(scope_value, {}).get(status, {}).get("channel", {}).get(product, {})
+            for ch, metrics in qty_bucket.items():
+                entry = qty_channel.setdefault(ch, {k: 0 for k in STAR_METRIC_COLUMNS})
+                for k, v in metrics.items():
+                    entry[k] += v
+            for ch, metrics in amt_bucket.items():
+                entry = amt_channel.setdefault(ch, {k: 0 for k in STAR_METRIC_COLUMNS})
+                for k, v in metrics.items():
+                    entry[k] += v
+    else:
+        qty_channel = star_data.get("수량", {}).get("주차별", {}).get(scope_value, {}).get("channel", {}).get(product, {})
+        amt_channel = star_data.get("금액", {}).get("주차별", {}).get(scope_value, {}).get("channel", {}).get(product, {})
+
+    channels = sorted(set(qty_channel) | set(amt_channel))
+    if not channels:
+        return None
+    rows = []
+    for ch in channels:
+        q = qty_channel.get(ch, {k: 0 for k in STAR_METRIC_COLUMNS})
+        a = amt_channel.get(ch, {k: 0 for k in STAR_METRIC_COLUMNS})
+        rows.append({
+            "채널": ch,
+            "S/I 수량": q['S/I'], "S/I 금액(억원)": a['S/I'] / 1e8,
+            "S/O 수량": q['S/O'], "S/O 금액(억원)": a['S/O'] / 1e8,
+        })
+    return pd.DataFrame(rows)
+
+
+def render_star_section(st, star_data, scope_type, scope_value, prev_scope_value):
+    """S/I·S/O 그룹 헤더 표 + 품목별 그래프 + 채널별(품목 선택) 표/그래프를 한 화면에 표시."""
+    st.caption(f"⚠️ STAR 원본은 {STAR_ACTUAL_CUTOFF_WEEK}주(9/12)까지는 실적으로 확정되고 이후는 FCST(예측)입니다. "
+               "금액은 억원 단위이며, 전년비는 2025년 STAR 데이터가 없어 비교할 수 없습니다(N/A).")
+    table = build_star_combined_table(star_data, scope_type, scope_value, prev_scope_value)
+    if table is None:
+        st.info(f"{scope_value}에 품목별 STAR 실적 데이터가 없습니다.")
+        return False
+
+    st.dataframe(table, use_container_width=True, hide_index=True)
+
+    # 품목별 S/I vs S/O 그래프 (수량 기준)
+    if scope_type == "월별":
+        qty = _combined_month_total(star_data, "수량", scope_value)
+    else:
+        qty = star_data.get("수량", {}).get("주차별", {}).get(scope_value, {}).get("total", {})
+    chart_df = pd.DataFrame([{"품목": p, "S/I": m["S/I"], "S/O": m["S/O"]} for p, m in sorted(qty.items())]).set_index("품목")
+    if not chart_df.empty:
+        st.markdown("**품목별 S/I·S/O 수량 비교**")
+        st.bar_chart(chart_df, color=["#164c96", "#8fb4e3"], height=300)
+
+    # 채널(SOP/종합몰/홈쇼핑/쿠팡)별 실적 - 거래선(평강 등) 정보는 STAR 원본에 없어 채널 기준으로 표시
+    products = sorted(qty.keys())
+    if products:
+        st.markdown("**품목별 채널 구성 (SOP·종합몰·홈쇼핑·쿠팡)**")
+        st.caption("STAR 원본에는 거래선(평강 등) 구분이 없어, 원본이 제공하는 채널(영업그룹) 기준으로 보여줍니다.")
+        selected_product = st.selectbox("품목 선택", products, key=f"star_channel_product_{scope_type}_{scope_value}")
+        channel_df = build_star_channel_table(star_data, scope_type, scope_value, selected_product)
+        if channel_df is not None:
+            display_df = channel_df.copy()
+            for col in ("S/I 수량", "S/O 수량"):
+                display_df[col] = display_df[col].map(lambda v: f"{v:,.0f}")
+            for col in ("S/I 금액(억원)", "S/O 금액(억원)"):
+                display_df[col] = display_df[col].map(lambda v: f"{v:,.1f}")
+            st.dataframe(display_df, use_container_width=True, hide_index=True)
+            st.bar_chart(channel_df.set_index("채널")[["S/I 수량", "S/O 수량"]], color=["#164c96", "#8fb4e3"], height=280)
         else:
-            st.caption("해당 조건에 데이터가 없습니다.")
-    return shown_any
-
+            st.caption("채널별 데이터가 없습니다.")
+    return True
 
 
 def read_json(root, filename, errors, default=None):
@@ -297,7 +417,7 @@ def render_month_week_analysis(st, root):
     for col, label, value, unit, precision in zip(st.columns(3), ["라이브커머스 매출", "어필리에이트 주문금액", "스마트스토어 신규 관심고객"], totals, ["백만원", "백만원", "명"], [2, 2, 0]):
         with col:
             st.metric(label, f"{shown(value, precision)} {unit}" if number(value) else "미제공")
-    st.caption("실제 실적 RAW 형식이 확정되면 동일 기준으로 KPI에 연결합니다. 채널 간 금액은 합산하지 않습니다.")
+    st.caption("실적 형식이 확정되면 동일 기준으로 KPI에 연결합니다. 채널 간 금액은 합산하지 않습니다.")
 
     st.subheader("채널별 비교 분석")
     display = []
@@ -311,11 +431,13 @@ def render_month_week_analysis(st, root):
     
     # 품목별 실적 추가 (STAR 기반, 수량/금액 모두 표시, 실적/FCST 자동 구분)
     if star_data:
-        st.subheader("품목별 S/I, S/O 실적 분석 (RAW 데이터)")
+        st.subheader("품목별 S/I, S/O 실적 분석")
         if not monthly:
             st.caption("STAR 원본은 자체 주차 번호 체계를 사용해 PP3G 업무주차(W번호)와 월경계 주차에서 1:1로 정확히 대응하지 않을 수 있습니다. "
                        "주차 선택 시에도 해당 월 전체 STAR 실적을 표시합니다. 주차 단위 STAR 실적은 '품목별 실적' 메뉴에서 STAR 자체 주차로 확인하세요.")
-        render_star_month_section(st, star_data, month)
+        month_num = star_month_sort_key(month)
+        prev_month = f"{month_num - 1}월" if month_num > 1 else None
+        render_star_section(st, star_data, "월별", month, prev_month)
 
     st.subheader("월간·주간 활동 분석")
     st.caption("활동과 실적이 같은 기간에 기록됐다는 관찰을 보여줍니다. 활동이 실적을 만들었다고 단정하지 않습니다.")
@@ -363,26 +485,36 @@ def render_product_performance(st, root):
 
     st.subheader("품목별 실적")
 
-    # STAR 데이터 있으면 먼저 표시 (수량 + 금액, 월별/주차별, 실적/FCST 자동 구분)
+    sync_month = None  # 채널별 실적(bizplan)과 동기화할 월
+
+    # STAR 데이터 있으면 먼저 표시 (S/I·S/O 그룹표 + 그래프 + 채널구성, 실적/FCST 자동 구분)
     if star_data:
-        st.markdown("### STAR 기반 실적 (RAW 데이터: S/I·S/O·RTF, 마감분은 실적/잔여기간은 FCST)")
+        st.markdown("### STAR 기반 실적 (S/I·S/O·RTF, 마감분은 실적/잔여기간은 FCST)")
         scope_type = st.radio("데이터 종류", ["월별", "주차별"], key="product_star_scope", horizontal=True)
         if scope_type == "월별":
             keys = sorted(
                 set(star_data.get("수량", {}).get("월별", {}).keys()) | set(star_data.get("금액", {}).get("월별", {}).keys()),
-                key=lambda m: int(m.replace("월", "")))
+                key=star_month_sort_key, reverse=True)
         else:
             keys = sorted(
                 set(star_data.get("수량", {}).get("주차별", {}).keys()) | set(star_data.get("금액", {}).get("주차별", {}).keys()),
-                key=star_week_sort_key)
+                key=star_week_sort_key, reverse=True)
             st.caption("STAR 원본 자체 주차 번호이며, PP3G 업무주차표(W번호)와 월경계 주차에서 다를 수 있습니다.")
 
         if keys:
             selected_scope = st.selectbox("대상 월" if scope_type == "월별" else "대상 주차", keys, key="product_star_scope_value")
             if scope_type == "월별":
-                render_star_month_section(st, star_data, selected_scope)
+                month_num = star_month_sort_key(selected_scope)
+                prev_scope = f"{month_num - 1}월" if month_num > 1 else None
+                sync_month = selected_scope
             else:
-                render_star_week_section(st, star_data, selected_scope)
+                weeks_sorted_asc = sorted(
+                    set(star_data.get("수량", {}).get("주차별", {}).keys()) | set(star_data.get("금액", {}).get("주차별", {}).keys()),
+                    key=star_week_sort_key)
+                idx = weeks_sorted_asc.index(selected_scope) if selected_scope in weeks_sorted_asc else -1
+                prev_scope = weeks_sorted_asc[idx - 1] if idx > 0 else None
+                sync_month = star_data.get("수량", {}).get("주차별", {}).get(selected_scope, {}).get("month")
+            render_star_section(st, star_data, scope_type, selected_scope, prev_scope)
         else:
             st.info("STAR 품목별 실적 데이터가 없습니다.")
 
@@ -397,14 +529,18 @@ def render_product_performance(st, root):
             for error in star_errors:
                 st.error(error)
 
-    # 채널별 실적
+    # 채널별 실적 (bizplan 기반) - 위 STAR 섹션에서 고른 월/주차와 동일 구간을 기본값으로 사용
     st.markdown("### 채널별 실적")
     if not data:
         st.info("채널별 실적 데이터가 없습니다.")
         return
-    
+
+    all_months = [f"{m}월" for m in range(12, 0, -1)]
+    default_index = all_months.index(sync_month) if sync_month in all_months else 0
+    if sync_month:
+        st.caption(f"위 STAR 섹션에서 선택한 기간({sync_month})과 같은 월을 기본으로 보여줍니다. 필요하면 아래에서 다른 월을 선택하세요.")
     product = st.selectbox("품목", ["전체"] + sorted(data), key="product_select")
-    month = st.selectbox("대상 월", [f"{m}월" for m in range(12, 0, -1)], key="product_month")
+    month = st.selectbox("대상 월", all_months, index=default_index, key="product_month")
     items = sorted(data) if product == "전체" else [product]
     channel_rows = [{"거래선": channel, "실적(수량)": sum(data[item].get(month, {}).get(channel, 0) for item in items)}
                     for channel in sorted({channel for item in items for values in data[item].values() for channel in values})]
@@ -419,4 +555,3 @@ def render_product_performance(st, root):
     st.line_chart(pd.DataFrame(trend).set_index("월"), color="#164c96", height=300)
     st.caption("현재 원본은 채널별·월별 품목 실적입니다. 주차별 품목 실적 파일이 추가되면 같은 화면에 주간 추이를 연결합니다.")
     for error in errors: st.error(error)
-
