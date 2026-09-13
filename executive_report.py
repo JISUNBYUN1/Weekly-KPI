@@ -36,7 +36,16 @@ def load_star_xlsx(root):
         if not star_path.exists():
             return {}, []
         
-        df = pd.read_excel(star_path, sheet_name=0, engine='openpyxl')
+        # openpyxl 오류 방지 - 다른 engine 사용
+        try:
+            df = pd.read_excel(star_path, sheet_name=0, engine='openpyxl')
+        except:
+            # openpyxl 실패시 다른 engine 시도
+            try:
+                df = pd.read_excel(star_path, sheet_name=0, engine='xlrd')
+            except:
+                # 마지막 시도 - 기본 engine
+                df = pd.read_excel(star_path, sheet_name=0)
         
         # 필요한 컬럼 확인
         required_cols = ['영업그룹', '기준품목', '주', '월', '메져_구분']
@@ -241,79 +250,73 @@ def collect_product_data(root):
     return result, errors
 
 
-def render_product_performance_with_star(st, root):
-    """STAR.xlsx 기반 품목별 S/I, S/O, FCST, RTF 분석"""
-    star_data, star_errors = load_star_xlsx(root)
-    
-    st.subheader("품목별 실적 분석 (RAW 데이터)")
-    
-    if not star_data:
-        st.info("STAR.xlsx 품목별 실적 데이터가 없습니다.")
-        for error in star_errors:
-            st.error(error)
-        return
-    
-    # 월 선택
-    months = sorted(set(key.split('_')[0] for key in star_data.keys() if key.split('_')[0]))
-    if not months:
-        st.warning("사용 가능한 월 데이터가 없습니다.")
-        return
-    
-    selected_month = st.selectbox("대상 월", months, key="product_star_month")
-    
-    # 선택한 월의 데이터 필터링
-    month_data = {k: v for k, v in star_data.items() if k.startswith(f"{selected_month}_")}
-    
-    if not month_data:
-        st.warning(f"{selected_month} 데이터가 없습니다.")
-        return
-    
-    # 품목별 집계
-    product_summary = {}
-    for key, data in month_data.items():
-        parts = key.split('_')
-        if len(parts) >= 4:
-            product = parts[2]
-            if product not in product_summary:
-                product_summary[product] = {
-                    'S/I_FCST': 0, 'S/I_실적': 0,
-                    'S/O_FCST': 0, 'S/O_실적': 0,
-                    'RTF_FCST': 0
-                }
-            for k, v in data.items():
-                if k in product_summary[product]:
-                    product_summary[product][k] += v if number(v) else 0
-    
-    # 테이블 구성
-    display_rows = []
-    for product, metrics in sorted(product_summary.items()):
-        si_rate = (metrics['S/I_실적'] / metrics['S/I_FCST'] * 100) if metrics['S/I_FCST'] > 0 else 0
-        so_rate = (metrics['S/O_실적'] / metrics['S/O_FCST'] * 100) if metrics['S/O_FCST'] > 0 else 0
-        
-        display_rows.append({
-            "품목": product,
-            "S/I FCST": f"{metrics['S/I_FCST']:,.0f}",
-            "S/I 실적": f"{metrics['S/I_실적']:,.0f}",
-            "S/I 달성율(%)": f"{si_rate:.1f}",
-            "S/O FCST": f"{metrics['S/O_FCST']:,.0f}",
-            "S/O 실적": f"{metrics['S/O_실적']:,.0f}",
-            "S/O 달성율(%)": f"{so_rate:.1f}",
-            "RTF FCST": f"{metrics['RTF_FCST']:,.0f}"
-        })
-    
-    st.dataframe(pd.DataFrame(display_rows), use_container_width=True, hide_index=True)
-    
-    if star_errors:
-        with st.expander("데이터 읽기 안내"):
-            for error in star_errors:
-                st.error(error)
-
-
 def render_product_performance(st, root):
     data, errors = collect_product_data(root)
+    star_data, star_errors = load_star_xlsx(root)
+    
     st.subheader("품목별 실적")
+    
+    # STAR 데이터 있으면 먼저 표시
+    if star_data:
+        st.markdown("### STAR 기반 실적 (RAW 데이터)")
+        
+        # 월 선택
+        months = sorted(set(key.split('_')[0] for key in star_data.keys() if key.split('_')[0]))
+        if months:
+            selected_month = st.selectbox("대상 월", months, key="product_star_month")
+            
+            # 선택한 월의 데이터 필터링
+            month_data = {k: v for k, v in star_data.items() if k.startswith(f"{selected_month}_")}
+            
+            if month_data:
+                # 품목별 집계
+                product_summary = {}
+                for key, data_item in month_data.items():
+                    parts = key.split('_')
+                    if len(parts) >= 4:
+                        product = parts[2]
+                        if product not in product_summary:
+                            product_summary[product] = {
+                                'S/I_FCST': 0, 'S/I_실적': 0,
+                                'S/O_FCST': 0, 'S/O_실적': 0,
+                                'RTF_FCST': 0
+                            }
+                        for k, v in data_item.items():
+                            if k in product_summary[product]:
+                                product_summary[product][k] += v if number(v) else 0
+                
+                # 테이블 구성
+                display_rows = []
+                for product, metrics in sorted(product_summary.items()):
+                    si_rate = (metrics['S/I_실적'] / metrics['S/I_FCST'] * 100) if metrics['S/I_FCST'] > 0 else 0
+                    so_rate = (metrics['S/O_실적'] / metrics['S/O_FCST'] * 100) if metrics['S/O_FCST'] > 0 else 0
+                    
+                    display_rows.append({
+                        "품목": product,
+                        "S/I FCST": f"{metrics['S/I_FCST']:,.0f}",
+                        "S/I 실적": f"{metrics['S/I_실적']:,.0f}",
+                        "S/I 달성율(%)": f"{si_rate:.1f}",
+                        "S/O FCST": f"{metrics['S/O_FCST']:,.0f}",
+                        "S/O 실적": f"{metrics['S/O_실적']:,.0f}",
+                        "S/O 달성율(%)": f"{so_rate:.1f}",
+                        "RTF FCST": f"{metrics['RTF_FCST']:,.0f}"
+                    })
+                
+                st.dataframe(pd.DataFrame(display_rows), use_container_width=True, hide_index=True)
+        
+        if star_errors:
+            with st.expander("STAR 데이터 읽기 안내"):
+                for error in star_errors:
+                    st.error(error)
+        
+        st.markdown("---")
+    
+    # 채널별 실적
+    st.markdown("### 채널별 실적")
     if not data:
-        st.info("품목별 실적 데이터가 없습니다."); return
+        st.info("채널별 실적 데이터가 없습니다.")
+        return
+    
     product = st.selectbox("품목", ["전체"] + sorted(data), key="product_select")
     month = st.selectbox("대상 월", [f"{m}월" for m in range(12, 0, -1)], key="product_month")
     items = sorted(data) if product == "전체" else [product]

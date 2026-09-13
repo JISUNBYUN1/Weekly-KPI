@@ -10,7 +10,7 @@ from pathlib import Path
 
 st.set_page_config(page_title="PP3G | Marketing Performance", page_icon="▥", layout="wide")
 
-from executive_report import STYLE, render_month_week_analysis, render_product_performance, render_product_performance_with_star
+from executive_report import STYLE, render_month_week_analysis, render_product_performance
 
 st.markdown(STYLE, unsafe_allow_html=True)
 
@@ -655,11 +655,7 @@ def dashboard():
 
     # 품목별 실적
     elif current_page == "FCST":
-        tab1, tab2 = st.tabs(["STAR 기반 실적", "채널별 실적"])
-        with tab1:
-            render_product_performance_with_star(st, Path(__file__).resolve().parent)
-        with tab2:
-            render_product_performance(st, Path(__file__).resolve().parent)
+        render_product_performance(st, Path(__file__).resolve().parent)
     
     # 프리미엄
     # 라이브커머스
