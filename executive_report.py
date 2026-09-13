@@ -36,7 +36,7 @@ def load_star_xlsx(root):
         if not star_path.exists():
             return {}, []
         
-        df = pd.read_excel(star_path, sheet_name=0)
+        df = pd.read_excel(star_path, sheet_name=0, engine='openpyxl')
         
         # 필요한 컬럼 확인
         required_cols = ['영업그룹', '기준품목', '주', '월', '메져_구분']
