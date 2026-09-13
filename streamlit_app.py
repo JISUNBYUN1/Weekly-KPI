@@ -10,7 +10,7 @@ from pathlib import Path
 
 st.set_page_config(page_title="PP3G | Marketing Performance", page_icon="▥", layout="wide")
 
-from executive_report import STYLE, render_month_week_analysis, render_product_performance, load_star_xlsx, render_star_section, star_week_sort_key
+from executive_report import STYLE, render_month_week_analysis, render_product_performance, load_star_xlsx, render_star_month_section, render_star_week_section, star_week_sort_key
 
 st.markdown(STYLE, unsafe_allow_html=True)
 
@@ -1074,7 +1074,7 @@ def dashboard():
         star_data, star_errors = load_star_xlsx(Path(__file__).resolve().parent)
         
         if star_data:
-            st.markdown("### 🎯 STAR 기반 프리미엄 제품 S/I, S/O FCST 실적")
+            st.markdown("### 🎯 STAR 기반 프리미엄 제품 S/I, S/O 실적 (마감분은 실적/잔여기간은 FCST)")
             
             scope_type = st.radio("데이터 종류", ["월별", "주차별"], key="premium_star_scope", horizontal=True)
             if scope_type == "월별":
@@ -1089,7 +1089,10 @@ def dashboard():
             
             if keys:
                 selected_scope = st.selectbox("대상 월" if scope_type == "월별" else "대상 주차", keys, key="premium_star_scope_value")
-                render_star_section(st, star_data, scope_type, selected_scope)
+                if scope_type == "월별":
+                    render_star_month_section(st, star_data, selected_scope)
+                else:
+                    render_star_week_section(st, star_data, selected_scope)
             else:
                 st.info("STAR 품목별 실적 데이터가 없습니다.")
             

@@ -29,21 +29,31 @@ h1 {font-size:2rem!important;letter-spacing:-.055em;font-weight:700!important;} 
 
 
 STAR_METRIC_COLUMNS = {
-    'S/I_FCST': '◆_AP1_S/I FCST_예상',
-    'S/O_FCST': '◆_AP1_S/O FCST_예상',
-    'RTF_FCST': '◆_AP1_RTF_예상',
+    'S/I': '◆_AP1_S/I FCST_예상',
+    'S/O': '◆_AP1_S/O FCST_예상',
+    'RTF': '◆_AP1_RTF_예상',
 }
 _STAR_MONTH_RE = re.compile(r"26Y(\d{2})M")
 _STAR_WEEK_RE = re.compile(r"26Y(\d{2})W([AB]?)")
 
+# STAR 원본은 'FCST_LATEST_VER'(최신 계획치) 단일 값이며, 마감된 과거 주차는 실적과
+# 동일해지고 아직 지나지 않은 주차는 예측치 그대로입니다. 확인 결과 STAR 36주는
+# A(8/30-31)/B(9/1-5)로 분할되고 그 다음 37주가 9/6-9/12로 정확히 떨어져,
+# 사용자가 알려준 '9/12 마감' 기준과 정확히 일치합니다. 따라서 37주까지는 실적,
+# 38주부터는 FCST(예측)로 구분합니다. 이 컷오프는 데이터 갱신 시 조정이 필요합니다.
+STAR_ACTUAL_CUTOFF_WEEK = 37
+
+
+def _star_status(week_num):
+    return "실적" if week_num <= STAR_ACTUAL_CUTOFF_WEEK else "FCST"
+
 
 def load_star_xlsx(root):
     """STAR.xlsx 로드 (header=7). 반환 구조:
-    {"수량": {"월별": {"8월": {품목: {지표: 값}}}, "주차별": {"36주A": {품목: {...}}}},
-     "금액": {...동일 구조...}}
-    확인 결과 이 STAR 추출본은 '◆_매출'/'◆_실판매' 칼럼이 전 기간에 걸쳐
-    S/I·S/O FCST 칼럼과 100% 동일해 실질적으로 실적(실제값)이 아닌 계획(FCST) 값이
-    중복 기재된 것으로 판단, S/I FCST·S/O FCST·RTF FCST만 신뢰 가능한 값으로 사용합니다.
+    {"수량": {
+        "월별": {"8월": {"실적": {품목: {S/I,S/O,RTF}}, "FCST": {품목: {...}}}},
+        "주차별": {"37주": {"status": "실적", "products": {품목: {...}}}, "38주": {"status": "FCST", ...}}
+     }, "금액": {...동일 구조...}}
     메져_구분(수량/금액)을 분리해 합산하며, 월은 행의 월(AB) 값을 그대로 사용해
     분할 주차(월경계)도 올바른 월에 귀속시킵니다. 주차 라벨은 STAR 원본 고유 번호이며
     PP3G 업무주차표(weeks_2026.json)의 W번호와 체계가 다를 수 있습니다."""
@@ -52,7 +62,7 @@ def load_star_xlsx(root):
         if not star_path.exists():
             return {}, []
 
-        df = pd.read_excel(star_path, sheet_name=0, header=7)
+        df = pd.read_excel(star_path, sheet_name=0, header=7, engine='openpyxl')
         required_cols = ['기준품목', '월(AB)', '주(AB)', '메져_구분']
         if not all(col in df.columns for col in required_cols):
             return {}, ["STAR.xlsx 필수 칼럼 부족"]
@@ -72,7 +82,9 @@ def load_star_xlsx(root):
             if not m_match or not w_match:
                 continue
             month_label = f"{int(m_match.group(1))}월"
-            week_label = f"{int(w_match.group(1))}주{w_match.group(2)}"
+            week_num = int(w_match.group(1))
+            week_label = f"{week_num}주{w_match.group(2)}"
+            status = _star_status(week_num)
 
             metrics = {}
             for key, col in STAR_METRIC_COLUMNS.items():
@@ -80,26 +92,31 @@ def load_star_xlsx(root):
                 metrics[key] = value if number(value) else 0
 
             bucket = result[measure_type]
-            for scope_key, label in (("월별", month_label), ("주차별", week_label)):
-                store = bucket[scope_key].setdefault(label, {})
-                entry = store.setdefault(product, {k: 0 for k in STAR_METRIC_COLUMNS})
-                for key, value in metrics.items():
-                    entry[key] += value
+
+            month_store = bucket["월별"].setdefault(month_label, {"실적": {}, "FCST": {}})[status]
+            entry = month_store.setdefault(product, {k: 0 for k in STAR_METRIC_COLUMNS})
+            for key, value in metrics.items():
+                entry[key] += value
+
+            week_store = bucket["주차별"].setdefault(week_label, {"status": status, "products": {}})
+            entry = week_store["products"].setdefault(product, {k: 0 for k in STAR_METRIC_COLUMNS})
+            for key, value in metrics.items():
+                entry[key] += value
 
         return result, []
     except Exception as e:
         return {}, [f"STAR.xlsx 로드 오류: {str(e)}"]
 
 
-def build_star_display_rows(bucket, unit_label):
-    """{품목: 지표dict} -> 화면 표시용 행 리스트 (FCST 계획값만; 실적 칼럼 없음)"""
+def build_star_display_rows(bucket, unit_label, status_label):
+    """{품목: 지표dict} -> 화면 표시용 행 리스트 (status_label: '실적' 또는 'FCST')"""
     rows = []
     for product, metrics in sorted(bucket.items()):
         rows.append({
             "품목": product,
-            f"S/I FCST({unit_label})": f"{metrics['S/I_FCST']:,.0f}",
-            f"S/O FCST({unit_label})": f"{metrics['S/O_FCST']:,.0f}",
-            f"RTF FCST({unit_label})": f"{metrics['RTF_FCST']:,.0f}",
+            f"S/I {status_label}({unit_label})": f"{metrics['S/I']:,.0f}",
+            f"S/O {status_label}({unit_label})": f"{metrics['S/O']:,.0f}",
+            f"RTF {status_label}({unit_label})": f"{metrics['RTF']:,.0f}",
         })
     return rows
 
@@ -109,20 +126,41 @@ def star_week_sort_key(label):
     return (int(match.group(1)), match.group(2)) if match else (-1, "")
 
 
-def render_star_section(st, star_data, scope_type, scope_value):
-    """수량/금액 두 표를 함께 렌더링. 표시할 데이터가 있었으면 True 반환."""
-    st.caption("⚠️ 이 STAR 추출본은 '실적' 칼럼이 FCST와 동일해 계획(FCST) 값만 신뢰할 수 있습니다. "
-               "실제 실적·달성율은 실적이 분리된 STAR 추출본이 확보되면 반영합니다.")
+def render_star_month_section(st, star_data, month_label):
+    """월별 화면: 실적(마감분)과 FCST(잔여기간)를 있는 만큼만 나눠서 표시."""
+    st.caption(f"⚠️ STAR 원본은 {STAR_ACTUAL_CUTOFF_WEEK}주(9/12)까지는 실적으로 확정되고, "
+               f"그 이후 주차는 아직 지나지 않아 FCST(예측)로 표시됩니다.")
     shown_any = False
     for unit_label in ("수량", "금액"):
-        bucket = star_data.get(unit_label, {}).get(scope_type, {}).get(scope_value, {})
-        st.markdown(f"**{unit_label} 기준 (FCST)**")
-        if bucket:
-            st.dataframe(pd.DataFrame(build_star_display_rows(bucket, unit_label)), use_container_width=True, hide_index=True)
+        month_bucket = star_data.get(unit_label, {}).get("월별", {}).get(month_label, {})
+        for status_label in ("실적", "FCST"):
+            data_bucket = month_bucket.get(status_label, {})
+            if data_bucket:
+                st.markdown(f"**{unit_label} 기준 — {status_label}**")
+                st.dataframe(pd.DataFrame(build_star_display_rows(data_bucket, unit_label, status_label)),
+                             use_container_width=True, hide_index=True)
+                shown_any = True
+    if not shown_any:
+        st.info(f"{month_label}에 품목별 STAR 실적 데이터가 없습니다.")
+    return shown_any
+
+
+def render_star_week_section(st, star_data, week_label):
+    """주차별 화면: 해당 주차의 status(실적/FCST) 하나로 표시."""
+    shown_any = False
+    for unit_label in ("수량", "금액"):
+        week_bucket = star_data.get(unit_label, {}).get("주차별", {}).get(week_label, {})
+        status_label = week_bucket.get("status", "FCST")
+        products = week_bucket.get("products", {})
+        st.markdown(f"**{unit_label} 기준 — {status_label}**")
+        if products:
+            st.dataframe(pd.DataFrame(build_star_display_rows(products, unit_label, status_label)),
+                         use_container_width=True, hide_index=True)
             shown_any = True
         else:
             st.caption("해당 조건에 데이터가 없습니다.")
     return shown_any
+
 
 
 def read_json(root, filename, errors, default=None):
@@ -264,20 +302,13 @@ def render_month_week_analysis(st, root):
         display.append(item)
     st.dataframe(pd.DataFrame(display), use_container_width=True, hide_index=True)
     
-    # 품목별 실적 추가 (STAR 기반, 수량/금액 모두 표시)
+    # 품목별 실적 추가 (STAR 기반, 수량/금액 모두 표시, 실적/FCST 자동 구분)
     if star_data:
         st.subheader("품목별 S/I, S/O 실적 분석 (RAW 데이터)")
-        if monthly:
-            render_star_section(st, star_data, "월별", month)
-        else:
-            month_bucket_qty = star_data.get("수량", {}).get("월별", {}).get(month, {})
-            month_bucket_amt = star_data.get("금액", {}).get("월별", {}).get(month, {})
-            if month_bucket_qty or month_bucket_amt:
-                st.caption("STAR 원본은 자체 주차 번호 체계를 사용해 PP3G 업무주차(W번호)와 월경계 주차에서 1:1로 정확히 대응하지 않을 수 있습니다. "
-                           "주차 선택 시에도 해당 월 전체 STAR 실적을 표시합니다. 주차 단위 STAR 실적은 '품목별 실적' 메뉴에서 STAR 자체 주차로 확인하세요.")
-                render_star_section(st, star_data, "월별", month)
-            else:
-                st.info(f"{month}에 품목별 STAR 실적 데이터가 없습니다.")
+        if not monthly:
+            st.caption("STAR 원본은 자체 주차 번호 체계를 사용해 PP3G 업무주차(W번호)와 월경계 주차에서 1:1로 정확히 대응하지 않을 수 있습니다. "
+                       "주차 선택 시에도 해당 월 전체 STAR 실적을 표시합니다. 주차 단위 STAR 실적은 '품목별 실적' 메뉴에서 STAR 자체 주차로 확인하세요.")
+        render_star_month_section(st, star_data, month)
 
     st.subheader("월간·주간 활동 분석")
     st.caption("활동과 실적이 같은 기간에 기록됐다는 관찰을 보여줍니다. 활동이 실적을 만들었다고 단정하지 않습니다.")
@@ -325,9 +356,9 @@ def render_product_performance(st, root):
 
     st.subheader("품목별 실적")
 
-    # STAR 데이터 있으면 먼저 표시 (수량 + 금액, 월별/주차별)
+    # STAR 데이터 있으면 먼저 표시 (수량 + 금액, 월별/주차별, 실적/FCST 자동 구분)
     if star_data:
-        st.markdown("### STAR 기반 실적 (RAW 데이터: S/I·S/O FCST·실적·RTF·달성율)")
+        st.markdown("### STAR 기반 실적 (RAW 데이터: S/I·S/O·RTF, 마감분은 실적/잔여기간은 FCST)")
         scope_type = st.radio("데이터 종류", ["월별", "주차별"], key="product_star_scope", horizontal=True)
         if scope_type == "월별":
             keys = sorted(
@@ -341,7 +372,10 @@ def render_product_performance(st, root):
 
         if keys:
             selected_scope = st.selectbox("대상 월" if scope_type == "월별" else "대상 주차", keys, key="product_star_scope_value")
-            render_star_section(st, star_data, scope_type, selected_scope)
+            if scope_type == "월별":
+                render_star_month_section(st, star_data, selected_scope)
+            else:
+                render_star_week_section(st, star_data, selected_scope)
         else:
             st.info("STAR 품목별 실적 데이터가 없습니다.")
 
