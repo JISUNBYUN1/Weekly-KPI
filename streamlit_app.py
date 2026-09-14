@@ -1069,14 +1069,12 @@ def dashboard():
             st.warning("스마트스토어 데이터가 없습니다")
     elif current_page == "프리미엄":
         st.subheader("💎 프리미엄 제품별 실적")
-        
-        # STAR 데이터 로드
+        st.caption("품목별 프리미엄 세그먼트 기준: 냉장고·김치냉장고=키친핏 / 세탁기=25kg / 조리기기(식기세척기)=14인용 / 정수기=냉온정")
+
         star_data, star_errors = load_star_xlsx(Path(__file__).resolve().parent)
-        
+
         if star_data:
-            st.markdown("### 🎯 STAR 기반 프리미엄 제품 S/I, S/O 실적 (마감분은 실적/잔여기간은 FCST)")
-            
-            scope_type = st.radio("데이터 종류", ["월별", "주차별"], key="premium_star_scope", horizontal=True)
+            scope_type = st.radio("데이터 종류", ["월별", "주차별"], key="premium_scope_type", horizontal=True)
             if scope_type == "월별":
                 keys = sorted(
                     set(star_data.get("수량", {}).get("월별", {}).keys()) | set(star_data.get("금액", {}).get("월별", {}).keys()),
@@ -1086,29 +1084,32 @@ def dashboard():
                     set(star_data.get("수량", {}).get("주차별", {}).keys()) | set(star_data.get("금액", {}).get("주차별", {}).keys()),
                     key=star_week_sort_key, reverse=True)
                 st.caption("STAR 원본 자체 주차 번호이며, PP3G 업무주차표(W번호)와 월경계 주차에서 다를 수 있습니다.")
-            
+
             if keys:
-                selected_scope = st.selectbox("대상 월" if scope_type == "월별" else "대상 주차", keys, key="premium_star_scope_value")
-                if scope_type == "월별":
-                    month_num = star_month_sort_key(selected_scope)
-                    prev_scope = f"{month_num - 1}월" if month_num > 1 else None
+                selected_scope = st.selectbox("대상 월" if scope_type == "월별" else "대상 주차", keys, key="premium_scope_value")
+                premium_df = build_premium_segment_table(star_data, scope_type, selected_scope)
+                if not premium_df.empty:
+                    st.markdown(f"### {selected_scope} 품목별 프리미엄 세그먼트 판매 비중")
+                    st.dataframe(premium_df, use_container_width=True, hide_index=True)
+
+                    chart_df = premium_df[["품목"]].copy()
+                    chart_df["S/O 비중(%)"] = premium_df["S/O 비중(%)"].apply(lambda v: float(v) if v != "N/A" else 0)
+                    st.markdown("**품목별 프리미엄 판매 비중(S/O 기준)**")
+                    st.bar_chart(chart_df.set_index("품목"), color="#9966cc", height=300)
                 else:
-                    weeks_sorted_asc = sorted(
-                        set(star_data.get("수량", {}).get("주차별", {}).keys()) | set(star_data.get("금액", {}).get("주차별", {}).keys()),
-                        key=star_week_sort_key)
-                    idx = weeks_sorted_asc.index(selected_scope) if selected_scope in weeks_sorted_asc else -1
-                    prev_scope = weeks_sorted_asc[idx - 1] if idx > 0 else None
-                render_star_section(st, star_data, scope_type, selected_scope, prev_scope)
+                    st.info(f"{selected_scope}에 프리미엄 세그먼트 데이터가 없습니다.")
             else:
-                st.info("STAR 품목별 실적 데이터가 없습니다.")
-            
-            st.markdown("---")
-        
-        if star_errors:
-            with st.expander("STAR 데이터 읽기 안내"):
-                for error in star_errors:
-                    st.warning(error)
-        
+                st.info("STAR 데이터가 없습니다.")
+
+            if star_errors:
+                with st.expander("STAR 데이터 읽기 안내"):
+                    for error in star_errors:
+                        st.warning(error)
+        else:
+            st.info("STAR 데이터가 없어 프리미엄 세그먼트 분석을 표시할 수 없습니다.")
+
+        st.markdown("---")
+
         # 기존 프리미엄 데이터
         premium_data = {}
         premium_products = ['냉장고', '세탁기', '식기세척기', '정수기']
