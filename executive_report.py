@@ -56,7 +56,11 @@ def _read_star_dataframe(csv_path, xlsx_path):
     if csv_path.exists():
         return pd.read_csv(csv_path, encoding="utf-8-sig")
     if xlsx_path.exists():
-        return pd.read_excel(xlsx_path, sheet_name=0, header=7, engine='openpyxl')
+        # 2025 STAR는 상단에 안내 행이 있고 8번째 행이 헤더다. 향후 양식이
+        # 바뀌어도 '기준품목' 헤더를 기준으로 찾아 전년 비교가 끊기지 않게 한다.
+        preview = pd.read_excel(xlsx_path, sheet_name=0, header=None, nrows=20, engine='openpyxl')
+        header_row = next((idx for idx in preview.index if "기준품목" in preview.iloc[idx].astype(str).tolist()), 0)
+        return pd.read_excel(xlsx_path, sheet_name=0, header=header_row, engine='openpyxl')
     return None
 
 
@@ -168,6 +172,16 @@ def load_star_xlsx(root):
 def star_week_sort_key(label):
     match = re.fullmatch(r"(\d{1,2})주([AB]?)", label or "")
     return (int(match.group(1)), match.group(2)) if match else (-1, "")
+
+
+def business_week_to_star_label(week_label):
+    """업무주차 W36B → STAR 표기 36주B.
+
+    월간ㆍ주간 분석의 선택값은 업무주차표 기준이고 STAR는 자체 표기를 사용하므로,
+    주간 셀인/셀아웃이 0으로 보이지 않도록 화면 경계에서만 변환한다.
+    """
+    match = re.fullmatch(r"W(\d{1,2})([AB]?)", str(week_label or ""))
+    return f"{int(match.group(1))}주{match.group(2)}" if match else week_label
 
 
 def star_month_sort_key(label):
@@ -648,7 +662,7 @@ def render_month_week_analysis(st, root):
     else:
         prev_totals = _period_totals(live, affiliate, smart, month, calendar, False, prev_week) if prev_week else [None, None, None]
 
-    st.subheader(f"{scope} 핵심 실적")
+    st.subheader(f"{scope} 핵심 실적 요약")
     totals = [strict_sum(row[field] for row in rows) for field in ("라이브 매출(백만)", "어필리에이트 주문금액(백만)", "신규 관심고객")]
     metric_cols = list(st.columns(5))
     for col, label, value, prev_value, unit, precision in zip(
@@ -665,8 +679,10 @@ def render_month_week_analysis(st, root):
             cur_totals = star_overall_totals(star_data, "월별", month)
             star_prev_totals = star_overall_totals(star_data, "월별", prev_month) if prev_month else None
         else:
-            cur_totals = star_overall_totals(star_data, "주차별", selected_week)
-            star_prev_totals = star_overall_totals(star_data, "주차별", prev_week) if prev_week else None
+            star_week = business_week_to_star_label(selected_week)
+            star_prev_week = business_week_to_star_label(prev_week) if prev_week else None
+            cur_totals = star_overall_totals(star_data, "주차별", star_week)
+            star_prev_totals = star_overall_totals(star_data, "주차별", star_prev_week) if star_prev_week else None
         si_amt = cur_totals["S/I_금액"] / 1e8
         so_amt = cur_totals["S/O_금액"] / 1e8
         si_delta = _pct_change(cur_totals["S/I_금액"], star_prev_totals["S/I_금액"]) if star_prev_totals else None
@@ -675,26 +691,46 @@ def render_month_week_analysis(st, root):
             st.metric("셀인(S/I) 실적(억원)", f"{si_amt:,.1f}", delta=f"{si_delta:+.1f}% ({change_label})" if number(si_delta) else None)
         with metric_cols[4]:
             st.metric("셀아웃(S/O) 실적(억원)", f"{so_amt:,.1f}", delta=f"{so_delta:+.1f}% ({change_label})" if number(so_delta) else None)
-    st.caption("실적 형식이 확정되면 동일 기준으로 KPI에 연결합니다. 채널 간 금액은 합산하지 않습니다.")
+    st.caption(f"모든 증감은 {change_label} 기준입니다. 셀인·셀아웃은 STAR 금액(억원), 채널 KPI는 거래선 입력 집계(백만원)입니다.")
 
     # 요약(써머리) — 거래선/품목 벤치마킹 인사이트: 특이 거래선·품목을 짚고 실행 가능한 제언을 제시
     st.subheader("📊 요약 및 벤치마킹 인사이트")
     week_scope_for_activity = None if monthly else selected_week
     observations, proposals = benchmark_insights(rows, weekly, week_scope_for_activity)
-    if star_data and monthly and prev_month:
-        star_obs, star_props = star_benchmark_insights(star_data, "월별", month, prev_month)
+    if star_data and (prev_month if monthly else prev_week):
+        star_scope = month if monthly else business_week_to_star_label(selected_week)
+        star_previous_scope = prev_month if monthly else business_week_to_star_label(prev_week)
+        star_obs, star_props = star_benchmark_insights(star_data, "월별" if monthly else "주차별", star_scope, star_previous_scope)
         observations += star_obs
         proposals += star_props
+    # 줄글이 아닌 경영 보고용 신호 목록: 값과 방향을 한 줄에 명확하게 표시한다.
+    period_signals = []
+    for label, value, prev_value, unit, precision in zip(
+            ["라이브커머스 매출", "어필리에이트 주문금액", "신규 관심고객"],
+            totals, prev_totals, ["백만원", "백만원", "명"], [1, 1, 0]):
+        if number(value):
+            delta_value = value - prev_value if number(prev_value) else None
+            delta_text = fmt_delta(delta_value, unit, precision) if number(delta_value) else "비교 기준 없음"
+            period_signals.append({"핵심 지표": label, "당기": fmt_amount(value, unit, precision), change_label: delta_text})
+    if star_data:
+        for label, key in (("셀인(S/I) 금액", "S/I_금액"), ("셀아웃(S/O) 금액", "S/O_금액")):
+            value = cur_totals[key] / 1e8
+            prev_value = star_prev_totals[key] / 1e8 if star_prev_totals else None
+            delta_value = value - prev_value if number(prev_value) else None
+            period_signals.append({"핵심 지표": label, "당기": fmt_amount(value, "억원", 1), change_label: fmt_delta(delta_value, "억원", 1) if number(delta_value) else "비교 기준 없음"})
+    if period_signals:
+        st.dataframe(pd.DataFrame(period_signals), use_container_width=True, hide_index=True)
     if observations:
+        st.markdown("**특이 신호**")
         for line in observations:
             st.markdown("- " + line)
     else:
         st.info("비교 가능한 데이터가 부족합니다.")
 
     if proposals:
-        with st.expander(f"🔍 상세 제언 보기 ({len(proposals)}건)", expanded=False):
-            for text in proposals:
-                st.warning(text)
+        with st.expander(f"🔍 실행 제안 · 벤치마킹 ({len(proposals)}건)", expanded=False):
+            for index, text in enumerate(proposals, 1):
+                st.markdown(f"**제안 {index} · 검토 및 실행**  \n{text}")
 
     st.subheader("채널별 비교 분석")
     display = []

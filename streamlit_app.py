@@ -10,7 +10,9 @@ from pathlib import Path
 
 st.set_page_config(page_title="PP3G | Marketing Performance", page_icon="▥", layout="wide")
 
-from executive_report import STYLE, render_month_week_analysis, render_product_performance, load_star_xlsx, render_star_section, star_week_sort_key, star_month_sort_key
+from executive_report import (STYLE, build_premium_segment_table, load_star_xlsx,
+                              render_month_week_analysis, render_product_performance,
+                              render_star_section, star_month_sort_key, star_week_sort_key)
 
 st.markdown(STYLE, unsafe_allow_html=True)
 
@@ -1068,7 +1070,7 @@ def dashboard():
         else:
             st.warning("스마트스토어 데이터가 없습니다")
     elif current_page == "프리미엄":
-        st.subheader("💎 프리미엄 제품별 실적")
+        st.subheader("💎 프리미엄 세그먼트 판매 비중")
         st.caption("품목별 프리미엄 세그먼트 기준: 냉장고·김치냉장고=키친핏 / 세탁기=25kg / 조리기기(식기세척기)=14인용 / 정수기=냉온정")
 
         star_data, star_errors = load_star_xlsx(Path(__file__).resolve().parent)
@@ -1121,7 +1123,9 @@ def dashboard():
             except:
                 premium_data[product] = {}
         
-        if premium_data:
+        # 기존 거래선별 프리미엄 JSON은 '전체/프리미엄/판매비중' 정의와 달라
+        # 위 STAR 기준 표와 중복 표시하지 않는다. 원본 보관만 유지한다.
+        if False and premium_data:
             # 제품별 Expander
             for product in premium_products:
                 if premium_data[product]:
