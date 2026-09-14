@@ -21,6 +21,7 @@ h1 {font-size:2rem!important;letter-spacing:-.055em;font-weight:700!important;} 
 [data-testid="stMetric"] {background:white;border:1px solid var(--line);border-top:3px solid var(--accent);padding:20px 22px;border-radius:8px;}
 [data-testid="stMetricLabel"] {color:var(--muted);font-size:.85rem;} [data-testid="stMetricValue"] {color:var(--ink);font-size:2rem;}
 [data-testid="stDataFrame"] {border:1px solid var(--line);border-radius:8px;overflow:hidden;} [data-testid="stExpander"] {background:white;border-radius:8px;}
+[data-testid="stDataFrame"] * {text-align:center!important;}
 .stTabs [data-baseweb="tab-list"] {gap:24px;border-bottom:1px solid var(--line);}
 .report-eyebrow {font-size:11px;letter-spacing:.16em;color:#64758a;font-weight:700;margin-bottom:8px;}
 @media print {[data-testid="stSidebar"],header,footer,.stButton {display:none!important;}.stApp {background:#fff;}.block-container {padding:0;max-width:none;}}
@@ -226,21 +227,25 @@ def build_premium_segment_table(star_data, scope_type, scope_value):
                     premium_bucket["S/I"] += metrics.get("S/I", 0)
                     premium_bucket["S/O"] += metrics.get("S/O", 0)
 
-        so_ratio = (premium["S/O"] / total["S/O"] * 100) if total["S/O"] else None
-        si_ratio = (premium["S/I"] / total["S/I"] * 100) if total["S/I"] else None
-        rows.append({
-            "품목": product,
-            "프리미엄 기준": f"{attr_col.replace('SMSS_ATTR0', 'ATTR')}='{keyword}' 포함",
-            "S/I 전체(수량)": f"{total['S/I']:,.0f}",
-            "S/I 프리미엄(수량)": f"{premium['S/I']:,.0f}",
-            "S/I 비중(%)": f"{si_ratio:.1f}" if number(si_ratio) else "N/A",
-            "S/O 전체(수량)": f"{total['S/O']:,.0f}",
-            "S/O 프리미엄(수량)": f"{premium['S/O']:,.0f}",
-            "S/O 비중(%)": f"{so_ratio:.1f}" if number(so_ratio) else "N/A",
-            "S/O 전체(억원)": _fmt_amount_100m(total_amt['S/O']),
-            "S/O 프리미엄(억원)": _fmt_amount_100m(premium_amt['S/O']),
-        })
-    return pd.DataFrame(rows)
+        for basis, all_values, premium_values, divisor in (
+                ("수량", total, premium, 1), ("금액(억원)", total_amt, premium_amt, 1e8)):
+            si_ratio = premium_values["S/I"] / all_values["S/I"] * 100 if all_values["S/I"] else None
+            so_ratio = premium_values["S/O"] / all_values["S/O"] * 100 if all_values["S/O"] else None
+            decimals = 0
+            rows.append({
+                ("품목", "품목"): product,
+                ("구분", "구분"): basis,
+                ("S/I", "전체"): f"{all_values['S/I'] / divisor:,.{decimals}f}",
+                ("S/I", "프리미엄"): f"{premium_values['S/I'] / divisor:,.{decimals}f}",
+                ("S/I", "비중(%)"): f"{si_ratio:.1f}" if number(si_ratio) else "N/A",
+                ("S/O", "전체"): f"{all_values['S/O'] / divisor:,.{decimals}f}",
+                ("S/O", "프리미엄"): f"{premium_values['S/O'] / divisor:,.{decimals}f}",
+                ("S/O", "비중(%)"): f"{so_ratio:.1f}" if number(so_ratio) else "N/A",
+            })
+    frame = pd.DataFrame(rows)
+    if not frame.empty:
+        frame.columns = pd.MultiIndex.from_tuples(frame.columns)
+    return frame
 
 
 def _combined_month_total(star_data, unit, month_label):
@@ -262,16 +267,18 @@ def _pct_change(current, previous):
 
 
 def _fmt_pct(value):
-    return f"{value:+.1f}" if number(value) else "N/A"
+    if not number(value):
+        return "N/A"
+    return f"+{value:.1f}" if value > 0 else f"△{abs(value):.1f}" if value < 0 else "0.0"
 
 
 def _fmt_amount_100m(value):
     """원 단위 금액 값을 억원 단위로 변환해 표시."""
-    return f"{value / 1e8:,.1f}" if number(value) else "0.0"
+    return f"{value / 1e8:,.0f}" if number(value) else "0"
 
 
 def build_star_combined_table(star_data, scope_type, scope_value, prev_scope_value):
-    """S/I·S/O를 그룹 헤더로 묶은 표: 수량|RTF비|금액(억원)|전기간비|전년비 (S/I),
+    """S/I·S/O를 그룹 헤더로 묶은 표: 수량|금액(억원)|전기간비|전년비 (S/I),
     수량|금액(억원)|전기간비|전년비 (S/O). 전년비는 2025년 STAR 데이터(STAR_2025.csv)가
     있으면 동월/동주차 기준으로 계산하고, 없으면 'N/A'로 표시합니다."""
     if scope_type == "월별":
@@ -303,7 +310,6 @@ def build_star_combined_table(star_data, scope_type, scope_value, prev_scope_val
         ap = amt_prev.get(product, {})
         qy = qty_yoy.get(product, {})
         ay = amt_yoy.get(product, {})
-        rtf_rate = (q['RTF'] / q['S/I'] * 100) if q['S/I'] else None
         si_qty_chg = _pct_change(q['S/I'], qp.get('S/I'))
         si_amt_chg = _pct_change(a['S/I'], ap.get('S/I'))
         so_qty_chg = _pct_change(q['S/O'], qp.get('S/O'))
@@ -313,9 +319,8 @@ def build_star_combined_table(star_data, scope_type, scope_value, prev_scope_val
         so_yoy_chg = _pct_change(q['S/O'], qy.get('S/O'))
         so_yoy_chg = so_yoy_chg if so_yoy_chg is not None else _pct_change(a['S/O'], ay.get('S/O'))
         rows.append({
-            ("품목", ""): product,
+            ("품목", "품목"): product,
             ("S/I", "수량"): f"{q['S/I']:,.0f}",
-            ("S/I", "RTF비(%)"): f"{rtf_rate:.1f}" if number(rtf_rate) else "N/A",
             ("S/I", "금액(억원)"): _fmt_amount_100m(a['S/I']),
             ("S/I", change_label): _fmt_pct(si_qty_chg) if si_qty_chg is not None else _fmt_pct(si_amt_chg),
             ("S/I", "전년비(%)"): _fmt_pct(si_yoy_chg),
@@ -399,7 +404,7 @@ def render_star_section(st, star_data, scope_type, scope_value, prev_scope_value
             for col in ("S/I 수량", "S/O 수량"):
                 display_df[col] = display_df[col].map(lambda v: f"{v:,.0f}")
             for col in ("S/I 금액(억원)", "S/O 금액(억원)"):
-                display_df[col] = display_df[col].map(lambda v: f"{v:,.1f}")
+                display_df[col] = display_df[col].map(lambda v: f"{v:,.0f}")
             st.dataframe(display_df, use_container_width=True, hide_index=True)
             st.bar_chart(channel_df.set_index("채널")[["S/I 수량", "S/O 수량"]], color=["#164c96", "#8fb4e3"], height=280)
         else:
@@ -430,6 +435,13 @@ def strict_sum(values):
 
 def shown(value, decimals=0):
     return f"{value:,.{decimals}f}" if number(value) else "미제공"
+
+
+def shown_kpi(value, decimals=0):
+    """KPI 실적값의 음수는 대시보드 공통 기호 △로 표시한다."""
+    if not number(value):
+        return "미제공"
+    return f"△{abs(value):,.{decimals}f}" if value < 0 else f"{value:,.{decimals}f}"
 
 
 def week_key(value):
@@ -481,43 +493,68 @@ def star_overall_totals(star_data, scope_type, scope_value):
     return total
 
 
-def benchmark_insights(rows, weekly=None, week_scope=None):
+def benchmark_insights(rows, weekly=None, week_scope=None, monthly=False):
     """거래선 간 특이값(1위/최하위)을 찾아 (관찰 리스트, 상세 제언 리스트)로 반환.
     상세 제언은 1위 거래선의 실제 기록 활동(weekly_data.json)이 있으면 그 내용을 인용해
     구체적으로 제안하고, 없으면 일반 제안으로 대체합니다."""
     weekly = weekly or []
     observations, proposals = [], []
 
-    def detailed_proposal(top_name, bottom_name, topic, gap_text, generic_action):
+    def activity_summary(text, limit=72):
+        text = re.sub(r"\s+", " ", str(text)).strip()
+        parts = [p.strip(" -·") for p in re.split(r"[\n。]|(?<=다)\.", text) if p.strip()]
+        value = parts[0] if parts else text
+        return value if len(value) <= limit else value[:limit - 1] + "…"
+
+    def detailed_proposal(top_name, bottom_name, topic, gap_text, generic_action, kpi):
         acts = activities(weekly, top_name, week_scope)
         if acts:
             _, _, activity_text = acts[-1]
-            return (f"**{bottom_name}**: {top_name}이(가) 진행한 활동 '{activity_text}'을(를) "
-                    f"벤치마킹해 적용하는 것을 검토·제안합니다. (현재 {topic} 격차 {gap_text})")
-        return (f"**{bottom_name}**: {top_name} 대비 {topic} 격차 {gap_text}. "
-                f"{top_name}의 활동 기록이 아직 없어 구체적 벤치마킹은 어렵습니다 — {generic_action}을 우선 검토·제안합니다.")
+            return (f"**대상 {bottom_name} | 근거** {topic} 격차 {gap_text} · "
+                    f"**벤치마킹** {top_name} ‘{activity_summary(activity_text)}’ · "
+                    f"**제안** 동일 활동을 1회 시험 적용하고 **확인 KPI** {kpi}로 전후 효과 비교")
+        return (f"**대상 {bottom_name} | 근거** {top_name} 대비 {topic} 격차 {gap_text} · "
+                f"**제안** {generic_action} · **확인 KPI** {kpi}")
+
+    amount_unit, amount_scale = ("억원", 100) if monthly else ("백만원", 1)
 
     valid = [(r["거래선"], r["라이브 매출(백만)"], r.get("방송횟수")) for r in rows if number(r["라이브 매출(백만)"])]
     if len(valid) >= 2:
         valid.sort(key=lambda x: x[1], reverse=True)
         top_name, top_val, top_cnt = valid[0]
         bottom_name, bottom_val, bottom_cnt = valid[-1]
-        observations.append(f"🏆 라이브 매출 1위: **{top_name}** {fmt_amount(top_val, '백만원', 1)} (방송 {top_cnt}회)")
-        observations.append(f"⚠️ 라이브 매출 최하위: **{bottom_name}** {fmt_amount(bottom_val, '백만원', 1)} (방송 {bottom_cnt}회)")
+        top_eff = top_val / top_cnt if number(top_cnt) and top_cnt else None
+        bottom_eff = bottom_val / bottom_cnt if number(bottom_cnt) and bottom_cnt else None
+        observations.append(f"라이브 선도 거래선 **{top_name}** {fmt_amount(top_val / amount_scale, amount_unit, 0)} · 회당 {fmt_amount(top_eff, '백만원', 0) if number(top_eff) else 'N/A'}")
+        observations.append(f"라이브 개선 거래선 **{bottom_name}** {fmt_amount(bottom_val / amount_scale, amount_unit, 0)} · 회당 {fmt_amount(bottom_eff, '백만원', 0) if number(bottom_eff) else 'N/A'}")
         proposals.append(detailed_proposal(top_name, bottom_name, "라이브 매출",
-                                            fmt_delta(bottom_val - top_val, "백만원", 1),
-                                            "방송 횟수·편성 시간대 확대"))
+                                            fmt_delta(top_val - bottom_val, "백만원", 0),
+                                            "상위 거래선의 고효율 편성 시간대·상품 구성을 한 회차에 복제",
+                                            "회당 매출·방송 유입·주문 전환율"))
+
+    valid_aff = [(r["거래선"], r["어필리에이트 주문금액(백만)"]) for r in rows if number(r["어필리에이트 주문금액(백만)"])]
+    if len(valid_aff) >= 2:
+        valid_aff.sort(key=lambda x: x[1], reverse=True)
+        top_name, top_val = valid_aff[0]
+        bottom_name, bottom_val = valid_aff[-1]
+        observations.append(f"어필리에이트 선도 거래선 **{top_name}** {fmt_amount(top_val / amount_scale, amount_unit, 0)}")
+        observations.append(f"어필리에이트 개선 거래선 **{bottom_name}** {fmt_amount(bottom_val / amount_scale, amount_unit, 0)}")
+        proposals.append(detailed_proposal(top_name, bottom_name, "어필리에이트 주문금액",
+                                            fmt_delta(top_val - bottom_val, "백만원", 0),
+                                            "주문 발생 크리에이터·상품 조합을 선별해 콘텐츠 발행을 집중",
+                                            "크리에이터당 주문·유입 대비 전환율·취소율"))
 
     valid2 = [(r["거래선"], r["신규 관심고객"]) for r in rows if number(r["신규 관심고객"])]
     if len(valid2) >= 2:
         valid2.sort(key=lambda x: x[1], reverse=True)
         top_name, top_val = valid2[0]
         bottom_name, bottom_val = valid2[-1]
-        observations.append(f"🏆 신규 관심고객 1위: **{top_name}** {fmt_delta(top_val, '명')}")
-        observations.append(f"⚠️ 신규 관심고객 최하위: **{bottom_name}** {fmt_delta(bottom_val, '명')}")
+        observations.append(f"관심고객 유입 선도 거래선 **{top_name}** {fmt_delta(top_val, '명')}")
+        observations.append(f"관심고객 유입 개선 거래선 **{bottom_name}** {fmt_delta(bottom_val, '명')}")
         proposals.append(detailed_proposal(top_name, bottom_name, "신규 관심고객",
                                             fmt_delta(top_val - bottom_val, "명"),
-                                            "신규 유입 채널·이벤트 확대"))
+                                            "상위 거래선의 유입 소재·혜택·노출 채널을 한 건씩 시험",
+                                            "신규 관심고객·신규 구매 전환율"))
     return observations, proposals
 
 
@@ -619,6 +656,16 @@ def _period_totals(live, affiliate, smart, month, calendar, monthly, selected_we
     return [strict_sum(row[field] for row in period_rows) for field in ("라이브 매출(백만)", "어필리에이트 주문금액(백만)", "신규 관심고객")]
 
 
+def _smart_interest_kpi(smart, month, week, monthly):
+    """월간은 월말 누적 관심고객, 주간은 해당 주 신규 유입을 사용한다."""
+    scope = "월별" if monthly else "주차별"
+    key = month if monthly else week
+    rows = smart.get("신규관심고객", {}).get(scope, {}).get(key, {})
+    field = "누적관심고객수" if monthly else "신규관심고객수"
+    values = [row.get(field) for row in rows.values() if number(row.get(field))]
+    return sum(values) if values else None
+
+
 def affiliate_period_data(affiliate, calendar, month, selected_week):
     """월별 원천이 없을 때도 그 달에 속한 주차 합계로 월 KPI를 제공한다."""
     weekly = affiliate.get("주차별", {})
@@ -684,14 +731,24 @@ def render_month_week_analysis(st, root):
 
     st.subheader(f"{scope} 핵심 실적 요약")
     totals = [strict_sum(row[field] for row in rows) for field in ("라이브 매출(백만)", "어필리에이트 주문금액(백만)", "신규 관심고객")]
+    totals[2] = _smart_interest_kpi(smart, month, selected_week, monthly)
+    prev_totals[2] = _smart_interest_kpi(smart, prev_month if monthly else month, prev_week, monthly) if (prev_month if monthly else prev_week) else None
     metric_cols = list(st.columns(5))
-    for col, label, value, prev_value, unit, precision in zip(
-            metric_cols[:3], ["라이브커머스 매출", "어필리에이트 주문금액", "스마트스토어 신규 관심고객"],
-            totals, prev_totals, ["백만원", "백만원", "명"], [2, 2, 0]):
+    money_unit, money_scale = ("억원", 100) if monthly else ("백만원", 1)
+    metric_specs = [
+        ("라이브커머스 매출", totals[0], prev_totals[0], money_unit, money_scale),
+        ("어필리에이트 주문금액", totals[1], prev_totals[1], money_unit, money_scale),
+        (("스마트스토어 누적 관심고객" if monthly else "스마트스토어 신규 관심고객"), totals[2], prev_totals[2], "명", 1),
+    ]
+    for col, (label, value, prev_value, unit, scale) in zip(metric_cols[:3], metric_specs):
         with col:
-            delta_pct = _pct_change(value, prev_value)
-            st.metric(label, f"{shown(value, precision)} {unit}" if number(value) else "미제공",
-                      delta=f"{delta_pct:+.1f}% ({change_label})" if number(delta_pct) else None)
+            displayed = value / scale if number(value) else None
+            if unit == "명":
+                delta = fmt_delta(value - prev_value, "명") if number(value) and number(prev_value) else None
+            else:
+                delta_pct = _pct_change(value, prev_value)
+                delta = f"{_fmt_pct(delta_pct)}%" if number(delta_pct) else None
+            st.metric(f"{label}({unit})", shown_kpi(displayed, 0), delta=f"{delta} ({change_label})" if delta else None)
 
     # 셀인(S/I)·셀아웃(S/O) 실적 카드 (STAR 기반, 금액=억원, 전월비/전주비 delta 표시)
     if star_data:
@@ -708,15 +765,15 @@ def render_month_week_analysis(st, root):
         si_delta = _pct_change(cur_totals["S/I_금액"], star_prev_totals["S/I_금액"]) if star_prev_totals else None
         so_delta = _pct_change(cur_totals["S/O_금액"], star_prev_totals["S/O_금액"]) if star_prev_totals else None
         with metric_cols[3]:
-            st.metric("셀인(S/I) 실적(억원)", f"{si_amt:,.1f}", delta=f"{si_delta:+.1f}% ({change_label})" if number(si_delta) else None)
+            st.metric("셀인 실적(억원)", f"{si_amt:,.0f}", delta=f"{_fmt_pct(si_delta)}% ({change_label})" if number(si_delta) else None)
         with metric_cols[4]:
-            st.metric("셀아웃(S/O) 실적(억원)", f"{so_amt:,.1f}", delta=f"{so_delta:+.1f}% ({change_label})" if number(so_delta) else None)
-    st.caption(f"모든 증감은 {change_label} 기준입니다. 셀인·셀아웃은 STAR 금액(억원), 채널 KPI는 거래선 입력 집계(백만원)입니다.")
+            st.metric("셀아웃 실적(억원)", f"{so_amt:,.0f}", delta=f"{_fmt_pct(so_delta)}% ({change_label})" if number(so_delta) else None)
+    st.caption(f"모든 증감은 {change_label} 기준입니다. 월 누계 금액은 억원, 주간 금액은 백만원으로 표시합니다.")
 
     # 요약(써머리) — 거래선/품목 벤치마킹 인사이트: 특이 거래선·품목을 짚고 실행 가능한 제언을 제시
     st.subheader("📊 요약 및 벤치마킹 인사이트")
     week_scope_for_activity = None if monthly else selected_week
-    observations, proposals = benchmark_insights(rows, weekly, week_scope_for_activity)
+    observations, proposals = benchmark_insights(rows, weekly, week_scope_for_activity, monthly)
     if star_data and (prev_month if monthly else prev_week):
         star_scope = month if monthly else business_week_to_star_label(selected_week)
         star_previous_scope = prev_month if monthly else business_week_to_star_label(prev_week)
@@ -726,22 +783,27 @@ def render_month_week_analysis(st, root):
     # 줄글이 아닌 경영 보고용 신호 목록: 값과 방향을 한 줄에 명확하게 표시한다.
     period_signals = []
     for label, value, prev_value, unit, precision in zip(
-            ["라이브커머스 매출", "어필리에이트 주문금액", "신규 관심고객"],
-            totals, prev_totals, ["백만원", "백만원", "명"], [1, 1, 0]):
+            ["라이브커머스 매출", "어필리에이트 주문금액", ("누적 관심고객" if monthly else "신규 관심고객")],
+            totals, prev_totals, [money_unit, money_unit, "명"], [0, 0, 0]):
         if number(value):
+            scale = 100 if monthly and unit == "억원" else 1
+            value = value / scale
+            prev_value = prev_value / scale if number(prev_value) else None
             delta_value = value - prev_value if number(prev_value) else None
             delta_text = fmt_delta(delta_value, unit, precision) if number(delta_value) else "비교 기준 없음"
-            period_signals.append({"핵심 지표": label, "당기": fmt_amount(value, unit, precision), change_label: delta_text})
+            current_text = fmt_delta(value, unit, precision) if unit == "명" else (
+                f"△{abs(value):,.{precision}f}{unit}" if value < 0 else fmt_amount(value, unit, precision))
+            period_signals.append({"핵심 지표": label, "당기": current_text, change_label: delta_text})
     if star_data:
-        for label, key in (("셀인(S/I) 금액", "S/I_금액"), ("셀아웃(S/O) 금액", "S/O_금액")):
+        for label, key in (("셀인 금액", "S/I_금액"), ("셀아웃 금액", "S/O_금액")):
             value = cur_totals[key] / 1e8
             prev_value = star_prev_totals[key] / 1e8 if star_prev_totals else None
             delta_value = value - prev_value if number(prev_value) else None
-            period_signals.append({"핵심 지표": label, "당기": fmt_amount(value, "억원", 1), change_label: fmt_delta(delta_value, "억원", 1) if number(delta_value) else "비교 기준 없음"})
+            period_signals.append({"핵심 지표": label, "당기": fmt_amount(value, "억원", 0), change_label: fmt_delta(delta_value, "억원", 0) if number(delta_value) else "비교 기준 없음"})
     if period_signals:
         st.dataframe(pd.DataFrame(period_signals), use_container_width=True, hide_index=True)
     if observations:
-        st.markdown("**특이 신호**")
+        st.markdown("**핵심 변동 및 확인 포인트**")
         for line in observations:
             st.markdown("- " + line)
     else:
@@ -756,7 +818,7 @@ def render_month_week_analysis(st, root):
     # 특이 거래선만 비교 차트와 신호로 보여주며 상세는 거래선별 분석 탭에서 확인한다.
     signal_df = pd.DataFrame(rows)
     if not signal_df.empty:
-        st.subheader("거래선별 특이 신호")
+        st.subheader("거래선별 성과 편차")
         chart_left, chart_right = st.columns(2)
         with chart_left:
             st.caption("라이브·어필리에이트 주문금액 비교")
@@ -856,7 +918,7 @@ def render_product_performance(st, root):
 
     # STAR 데이터 있으면 먼저 표시 (S/I·S/O 그룹표 + 그래프 + 채널구성, 실적/FCST 자동 구분)
     if star_data:
-        st.markdown("### STAR 기반 실적 (S/I·S/O·RTF, 마감분은 실적/잔여기간은 FCST)")
+        st.markdown("### STAR 기반 실적 (셀인·셀아웃, 마감분은 실적/잔여기간은 FCST)")
         scope_type = st.radio("데이터 종류", ["월별", "주차별"], key="product_star_scope", horizontal=True)
         if scope_type == "월별":
             keys = sorted(
@@ -890,7 +952,9 @@ def render_product_performance(st, root):
                 for error in star_errors:
                     st.error(error)
 
-        st.markdown("---")
+        # STAR 안에서 품목별 총 실적과 SOP·종합몰·홈쇼핑·쿠팡 채널 구성을
+        # 함께 보여주므로 별도 bizplan 표를 중복 노출하지 않는다.
+        return
     elif star_errors:
         with st.expander("STAR 데이터 읽기 안내"):
             for error in star_errors:

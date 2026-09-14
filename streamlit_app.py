@@ -294,37 +294,31 @@ def live_select_period(data, calendar, month, week):
     return data.get("주차별", {}).get(week, {}), "주차별 제공 실적"
 
 
-def live_table_rows(agencies):
+def live_table_rows(agencies, monthly=False):
     if not agencies:
         return []
     records = {agency: agencies.get(agency, {}) for agency in AGENCIES}
     total = live_sum_records(records.values())
-    total["마케팅활동"] = "거래선별 내용 참조"
     rows = []
     for agency, record in [("전체", total)] + list(records.items()):
         count = record.get("방송횟수")
         sale = record.get("방송매출")
-        cost = record.get("소요비용")
+        scale = 100000000 if monthly else 1000000
         rows.append({
             "거래선": agency,
             "방송횟수": f"{count:,.0f}" if count is not None else "미제공",
-            "방송매출(백만)": f"{sale / 1000000:,.2f}" if sale is not None else "미제공",
-            "소요비용(백만)": f"{cost / 1000000:,.2f}" if cost is not None else "미제공",
-            "마케팅활동": record.get("마케팅활동") or "미제공",
+            f"방송매출({'억원' if monthly else '백만원'})": f"{sale / scale:,.0f}" if sale is not None else "미제공",
         })
     return rows
 
 
-def live_render_table(agencies):
-    st.dataframe(pd.DataFrame(live_table_rows(agencies)), use_container_width=True, hide_index=True)
-    st.caption("금액 단위: 백만원 · 소수점 둘째 자리 표시 · 미제공과 0은 구분합니다.")
-    if any(record.get("마케팅활동") for record in agencies.values()):
-        with st.expander("📝 마케팅활동 전문 보기"):
-            for agency in AGENCIES:
-                activity = agencies.get(agency, {}).get("마케팅활동")
-                if activity:
-                    st.write(f"**{agency}**")
-                    st.text(activity)
+def live_render_table(agencies, monthly=False):
+    st.dataframe(pd.DataFrame(live_table_rows(agencies, monthly)), use_container_width=True, hide_index=True)
+    chart = pd.DataFrame([{"거래선": agency, "방송매출": record.get("방송매출", 0) / (1e8 if monthly else 1e6)}
+                          for agency, record in agencies.items()])
+    if hasattr(chart, "empty") and not chart.empty:
+        st.bar_chart(chart.set_index("거래선"), color="#164c96", height=280)
+    st.caption(f"금액 단위: {'억원' if monthly else '백만원'} · 반올림 정수 표시 · 미제공과 0은 구분합니다.")
 
 
 def live_render_page():
@@ -372,7 +366,7 @@ def live_render_page():
     agencies, note = live_select_period(data, calendar, month, week)
     if agencies:
         st.caption(note)
-        live_render_table(agencies)
+        live_render_table(agencies, monthly=(week == "계"))
     else:
         st.info(f"{month} {week}: 제공된 데이터가 없습니다.")
 
@@ -408,6 +402,13 @@ def format_display_value(val):
         else:
             return f"{int(val):,}"
     return str(val)
+
+
+def format_change_percent(value):
+    """증감률 공통 표기: 성장 + 유지, 감소 △, 소수점 한 자리."""
+    if not isinstance(value, (int, float)):
+        return "N/A"
+    return f"+{value:,.1f}" if value > 0 else f"△{abs(value):,.1f}" if value < 0 else "0.0"
 
 # 라이브커머스 테이블 생성
 def create_live_commerce_table(data_dict, title=""):
@@ -945,84 +946,72 @@ def dashboard():
                 smartstore_data = {}
         
         if smartstore_data:
-            # 신규관심고객과 구매비중을 같은 화면에 표시
-            st.subheader("신규 관심고객 유입 현황")
-            
-            # 월/주차 선택
+            # 두 분석 영역이 동일한 기간 선택을 공유한다.
             col1, col2 = st.columns(2)
             with col1:
-                data_type = st.radio("데이터 종류", ["월별", "주차별"], key="ss_interest_type")
+                data_type = st.radio("데이터 종류", ["월별", "주차별"], key="ss_scope_type", horizontal=True)
             with col2:
-                if data_type == "월별":
-                    all_months = list(reversed(list(smartstore_data["신규관심고객"]["월별"].keys())))
-                    selected = st.selectbox("월 선택", all_months, key="ss_interest_month")
-                    display_data = smartstore_data["신규관심고객"]["월별"].get(selected, {})
-                else:
-                    all_weeks = sorted(smartstore_data["신규관심고객"]["주차별"].keys(), reverse=True)
-                    selected = st.selectbox("주차 선택", all_weeks, key="ss_interest_week")
-                    display_data = smartstore_data["신규관심고객"]["주차별"].get(selected, {})
-            
+                bucket_key = "월별" if data_type == "월별" else "주차별"
+                interest_bucket = smartstore_data.get("신규관심고객", {}).get(bucket_key, {})
+                purchase_bucket = smartstore_data.get("구매비중", {}).get(bucket_key, {})
+                options = sorted(set(interest_bucket) | set(purchase_bucket),
+                                 key=(lambda x: int(str(x).replace("월", ""))) if data_type == "월별" else live_week_sort_key,
+                                 reverse=True)
+                selected = st.selectbox("대상 월" if data_type == "월별" else "대상 주차", options, key="ss_scope_value")
+            display_data = interest_bucket.get(selected, {})
+            display_data2 = purchase_bucket.get(selected, {})
+            ordered = sorted(options, key=(lambda x: int(str(x).replace("월", ""))) if data_type == "월별" else live_week_sort_key)
+            selected_index = ordered.index(selected) if selected in ordered else -1
+            previous_key = ordered[selected_index - 1] if selected_index > 0 else None
+            previous_interest = interest_bucket.get(previous_key, {}) if previous_key else {}
+
+            st.subheader("신규 관심고객 유입 현황")
             if display_data:
-                # 테이블 생성
                 rows = []
                 for agency, data in display_data.items():
+                    field = "누적관심고객수" if data_type == "월별" else "신규관심고객수"
+                    current_value = data.get(field, 0)
+                    previous_value = previous_interest.get(agency, {}).get(field)
+                    delta = current_value - previous_value if isinstance(previous_value, (int, float)) else None
                     row = {
                         "거래선": agency,
                         "누적관심고객수": f"{data.get('누적관심고객수', 0):,}",
                         "신규관심고객수": f"{data.get('신규관심고객수', 0):,}",
+                        ("전월비(명)" if data_type == "월별" else "전주비(명)"):
+                            (f"+{delta:,.0f}" if delta > 0 else f"△{abs(delta):,.0f}" if delta < 0 else "0") if delta is not None else "N/A",
                     }
-                    if data_type == "월별":
-                        row["전월비(%)"] = f"{data.get('전월비', 0):.2f}%"
-                    else:
-                        row["전주비(%)"] = f"{data.get('전주비', 0):.2f}%"
                     rows.append(row)
-                
                 df = pd.DataFrame(rows)
                 st.dataframe(df, use_container_width=True, hide_index=True)
+                chart_values = pd.DataFrame([{"거래선": agency, "신규 관심고객": values.get("신규관심고객수", 0)}
+                                             for agency, values in display_data.items()]).set_index("거래선")
+                st.bar_chart(chart_values, color="#164c96", height=240)
             
             st.markdown("---")
             st.subheader("구매비중 변화 (신규 vs 재구매)")
-            
-            # 월/주차 선택
-            col1, col2 = st.columns(2)
-            with col1:
-                data_type2 = st.radio("데이터 종류", ["월별", "주차별"], key="ss_purchase_type")
-            with col2:
-                if data_type2 == "월별":
-                    all_months = list(reversed(list(smartstore_data["구매비중"]["월별"].keys())))
-                    selected2 = st.selectbox("월 선택", all_months, key="ss_purchase_month")
-                    display_data2 = smartstore_data["구매비중"]["월별"].get(selected2, {})
-                else:
-                    all_weeks = sorted(smartstore_data["구매비중"]["주차별"].keys(), reverse=True)
-                    selected2 = st.selectbox("주차 선택", all_weeks, key="ss_purchase_week")
-                    display_data2 = smartstore_data["구매비중"]["주차별"].get(selected2, {})
-            
             if display_data2:
-                # 테이블 생성
                 rows = []
                 for agency, data in display_data2.items():
                     row = {
                         "거래선": agency,
                         "신규구매고객": f"{data.get('신규구매고객수', 0):,}",
-                        "신규구매비중(%)": f"{data.get('신규구매비중', 0):.2f}%",
+                        "신규구매비중(%)": f"{data.get('신규구매비중', 0):.1f}",
                         "재구매고객": f"{data.get('재구매고객수', 0):,}",
-                        "재구매비중(%)": f"{data.get('재구매비중', 0):.2f}%",
+                        "재구매비중(%)": f"{data.get('재구매비중', 0):.1f}",
                     }
-                    if data_type2 == "월별":
-                        row["신규전월비(%)"] = f"{data.get('신규구매전월비', 0):.2f}%"
-                        row["재전월비(%)"] = f"{data.get('재구매전월비', 0):.2f}%"
+                    if data_type == "월별":
+                        row["신규전월비(%)"] = format_change_percent(data.get('신규구매전월비', 0))
+                        row["재구매 전월비(%)"] = format_change_percent(data.get('재구매전월비', 0))
                     else:
-                        row["신규전주비(%)"] = f"{data.get('신규구매전주비', 0):.2f}%"
-                        row["재전주비(%)"] = f"{data.get('재구매전주비', 0):.2f}%"
+                        row["신규전주비(%)"] = format_change_percent(data.get('신규구매전주비', 0))
+                        row["재구매 전주비(%)"] = format_change_percent(data.get('재구매전주비', 0))
                     rows.append(row)
-                
                 df = pd.DataFrame(rows)
                 st.dataframe(df, use_container_width=True, hide_index=True)
         else:
             st.warning("스마트스토어 데이터가 없습니다")
     elif current_page == "프리미엄":
         st.subheader("💎 프리미엄 세그먼트 판매 비중")
-        st.caption("품목별 프리미엄 세그먼트 기준: 냉장고·김치냉장고=키친핏 / 세탁기=25kg / 조리기기(식기세척기)=14인용 / 정수기=냉온정")
 
         star_data, star_errors = load_star_xlsx(Path(__file__).resolve().parent)
 
@@ -1045,10 +1034,14 @@ def dashboard():
                     st.markdown(f"### {selected_scope} 품목별 프리미엄 세그먼트 판매 비중")
                     st.dataframe(premium_df, use_container_width=True, hide_index=True)
 
-                    chart_df = premium_df[["품목"]].copy()
-                    chart_df["S/O 비중(%)"] = premium_df["S/O 비중(%)"].apply(lambda v: float(v) if v != "N/A" else 0)
-                    st.markdown("**품목별 프리미엄 판매 비중(S/O 기준)**")
-                    st.bar_chart(chart_df.set_index("품목"), color="#9966cc", height=300)
+                    quantity_rows = premium_df[premium_df[("구분", "구분")] == "수량"]
+                    chart_df = pd.DataFrame({
+                        "품목": quantity_rows[("품목", "품목")],
+                        "S/I 비중(%)": quantity_rows[("S/I", "비중(%)")].map(lambda v: float(v) if v != "N/A" else 0),
+                        "S/O 비중(%)": quantity_rows[("S/O", "비중(%)")].map(lambda v: float(v) if v != "N/A" else 0),
+                    }).set_index("품목")
+                    st.markdown("**품목별 프리미엄 수량 비중**")
+                    st.bar_chart(chart_df, color=["#9966cc", "#c5a3df"], height=300)
                 else:
                     st.info(f"{selected_scope}에 프리미엄 세그먼트 데이터가 없습니다.")
             else:
@@ -1061,93 +1054,6 @@ def dashboard():
         else:
             st.info("STAR 데이터가 없어 프리미엄 세그먼트 분석을 표시할 수 없습니다.")
 
-        st.markdown("---")
-
-        # 기존 프리미엄 데이터
-        premium_data = {}
-        premium_products = ['냉장고', '세탁기', '식기세척기', '정수기']
-        
-        for product in premium_products:
-            try:
-                with open(f'premium_{product}.json', 'r', encoding='utf-8') as f:
-                    premium_data[product] = json.load(f)
-            except:
-                premium_data[product] = {}
-        
-        # 기존 거래선별 프리미엄 JSON은 '전체/프리미엄/판매비중' 정의와 달라
-        # 위 STAR 기준 표와 중복 표시하지 않는다. 원본 보관만 유지한다.
-        if False and premium_data:
-            # 제품별 Expander
-            for product in premium_products:
-                if premium_data[product]:
-                    with st.expander(f"💎 {product}", expanded=False):
-                        # 월별 선택
-                        months = sorted([m for m in premium_data[product].keys() if isinstance(premium_data[product].get(m), dict)], reverse=True)
-                        
-                        if months:
-                            selected_month = st.selectbox(f"{product} 월 선택", months, key=f"prem_{product}_month")
-                            
-                            if selected_month in premium_data[product]:
-                                month_data = premium_data[product][selected_month]
-                                
-                                # 테이블 생성
-                                st.markdown(f"### {selected_month} {product} 실적")
-                                
-                                html = f"""
-                                <style>
-                                    .prem-table {{ width: 100%; border-collapse: collapse; font-size: 13px; }}
-                                    .prem-table th, .prem-table td {{ border: 1px solid #d0d0d0; padding: 8px 6px; text-align: center; height: 26px; }}
-                                    .prem-header {{ background: #9966cc; color: white; font-weight: 600; }}
-                                    .prem-total {{ background: #fff2cc; font-weight: 600; border-top: 2px solid #333; }}
-                                    .prem-data {{ background: #f9f9f9; }}
-                                    .prem-data:nth-child(even) {{ background: #ffffff; }}
-                                    .prem-agency {{ text-align: left; font-weight: 500; padding-left: 8px; }}
-                                    .prem-number {{ text-align: right; padding-right: 4px; font-family: 'Courier New', monospace; }}
-                                </style>
-                                <table class="prem-table">
-                                    <thead>
-                                        <tr>
-                                            <th class="prem-header">거래선</th>
-                                            <th class="prem-header">매출(백만)</th>
-                                            <th class="prem-header">판매량</th>
-                                            <th class="prem-header">전월비</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                """
-                                
-                                # 합계 행
-                                if '합계' in month_data:
-                                    total = month_data['합계']
-                                    html += f"""
-                                        <tr class="prem-total">
-                                            <td class="prem-agency">합계</td>
-                                            <td class="prem-number">{total.get('매출', 0):,.1f}</td>
-                                            <td class="prem-number">{total.get('판매량', 0):,}</td>
-                                            <td class="prem-number">{total.get('전월비', '0'):}</td>
-                                        </tr>
-                                    """
-                                
-                                # 거래선별 행
-                                for agency in AGENCIES:
-                                    if agency in month_data and agency != '합계':
-                                        data = month_data[agency]
-                                        html += f"""
-                                            <tr class="prem-data">
-                                                <td class="prem-agency">{agency}</td>
-                                                <td class="prem-number">{data.get('매출', 0):,.1f}</td>
-                                                <td class="prem-number">{data.get('판매량', 0):,}</td>
-                                                <td class="prem-number">{data.get('전월비', '0'):}</td>
-                                            </tr>
-                                        """
-                                
-                                html += """
-                                    </tbody>
-                                </table>
-                                """
-                                st.markdown(html, unsafe_allow_html=True)
-        else:
-            st.warning("프리미엄 데이터가 없습니다")
     
     # 거래선 현황
     elif current_page == "거래선현황":

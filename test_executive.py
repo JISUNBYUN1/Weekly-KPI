@@ -21,6 +21,7 @@ class UI:
             return "전체"
         return self.month
     def metric(self, *args, **kwargs): self.metrics.append(args)
+    def radio(self, label, options, **kwargs): return options[0]
     def bar_chart(self, data, **kwargs): self.charts.append(data)
     def line_chart(self, data, **kwargs): self.charts.append(data)
     def expander(self, *args, **kwargs): return self
@@ -43,9 +44,9 @@ class Tests(unittest.TestCase):
     def test_august_month_report(self):
         ui = UI("8월")
         render_month_week_analysis(ui, ROOT)
-        self.assertEqual(ui.metrics[0][1], "4,187.38 백만원")
-        self.assertEqual(ui.metrics[1][1], "109.41 백만원")
-        self.assertEqual(ui.metrics[2][1], "-213 명")
+        self.assertEqual(ui.metrics[0][1], "42")
+        self.assertEqual(ui.metrics[1][1], "1")
+        self.assertEqual(ui.metrics[2][1], "1,003,588")
         self.assertTrue(ui.charts)
 
     def test_empty_december(self):
@@ -53,7 +54,7 @@ class Tests(unittest.TestCase):
         render_month_week_analysis(ui, ROOT)
         self.assertTrue(all(value == "미제공" for _, value in ui.metrics[:2]))
         # 스마트스토어 원본에는 12월 0이 실제 기재되어 있어 미제공으로 바꾸지 않는다.
-        self.assertEqual(ui.metrics[2][1], "0 명")
+        self.assertEqual(ui.metrics[2][1], "0")
         self.assertTrue(ui.charts)
 
     def test_all_months_render(self):
@@ -68,7 +69,7 @@ class Tests(unittest.TestCase):
     def test_weekly_report(self):
         ui = UI("8월", "W32")
         render_month_week_analysis(ui, ROOT)
-        self.assertEqual(ui.metrics[0][1], "1,197.35 백만원")
+        self.assertEqual(ui.metrics[0][1], "1,197")
 
     def test_product_report(self):
         ui = UI("8월")

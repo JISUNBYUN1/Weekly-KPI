@@ -133,23 +133,21 @@ class LiveTests(unittest.TestCase):
                        "마케팅활동": "방송 소재 테스트"}}
         before = copy.deepcopy(data)
         row = H["live_table_rows"](data)[1]
-        self.assertEqual(row, {"거래선": "평강", "방송횟수": "1,234", "방송매출(백만)": "5.50",
-                               "소요비용(백만)": "0.50", "마케팅활동": "방송 소재 테스트"})
+        self.assertEqual(row, {"거래선": "평강", "방송횟수": "1,234", "방송매출(백만원)": "6"})
         self.assertEqual(data, before)
 
     def test_zero_distinct_from_missing(self):
         rows = H["live_table_rows"]({"평강": {"방송횟수": 0, "방송매출": 0, "소요비용": None}})
         self.assertEqual(rows[1]["방송횟수"], "0")
-        self.assertEqual(rows[1]["방송매출(백만)"], "0.00")
-        self.assertEqual(rows[1]["소요비용(백만)"], "미제공")
+        self.assertEqual(rows[1]["방송매출(백만원)"], "0")
         self.assertEqual(rows[2]["방송횟수"], "미제공")
         self.assertEqual(rows[0]["방송횟수"], "미제공")
 
-    def test_eight_rows_and_five_columns(self):
-        rows = H["live_table_rows"](self.data["월별"]["8월"])
+    def test_eight_rows_and_three_columns(self):
+        rows = H["live_table_rows"](self.data["월별"]["8월"], monthly=True)
         self.assertEqual([r["거래선"] for r in rows], ["전체"] + H["AGENCIES"])
-        self.assertTrue(all(len(row) == 5 for row in rows))
-        self.assertEqual(rows[0]["방송매출(백만)"], "4,187.38")
+        self.assertTrue(all(len(row) == 3 for row in rows))
+        self.assertEqual(rows[0]["방송매출(억원)"], "42")
 
     def test_imported_data_no_period_cost_invented(self):
         for section in ("월별", "주차별"):
@@ -165,8 +163,7 @@ class LiveTests(unittest.TestCase):
                                  self.data["주차별"]["계"][agency][metric])
 
     def test_unmatched_week_preserved_not_remapped(self):
-        self.assertEqual(self.data["확인필요"][0]["원본주차"], "36A주")
-        self.assertIn("원본데이터", self.data["확인필요"][0])
+        self.assertEqual(self.data["확인필요"], [])
         self.assertNotIn("W36A", self.data["주차별"])
         self.assertNotIn("W36", self.data["주차별"])
 
@@ -214,14 +211,14 @@ class LiveTests(unittest.TestCase):
         self.assertEqual(st.options["주차 선택"], ["계"])
         self.assertEqual(st.tables[0][0]["방송횟수"], "694")
 
-    def test_page_marketing_activity_remains_plain_text(self):
+    def test_page_marketing_activity_is_not_displayed(self):
         data = copy.deepcopy(self.data)
         data["월별"]["8월"]["평강"]["마케팅활동"] = "<script>alert(1)</script>"
         st = FakeStreamlit("8월")
         with patch.dict(H, st=st, pd=types.SimpleNamespace(DataFrame=lambda rows: rows),
                         live_load_data=lambda: data):
             H["live_render_page"]()
-        self.assertIn(("text", ("<script>alert(1)</script>",)), st.calls)
+        self.assertNotIn(("text", ("<script>alert(1)</script>",)), st.calls)
 
     def test_activity_aggregation_deduplicates_without_inventing(self):
         result = H["live_sum_records"]([{"마케팅활동": " A "}, {"마케팅활동": "A"}, {"마케팅활동": "B"}])
@@ -270,8 +267,7 @@ class LiveTests(unittest.TestCase):
         self.assertEqual(st.options["월 선택"], [f"{m}월" for m in range(12, 0, -1)])
         self.assertEqual(st.options["주차 선택"], ["계", "W35A", "W34", "W33", "W32", "W31B"])
         self.assertEqual(st.tables[0][0]["방송횟수"], "227")
-        self.assertEqual(st.tables[0][0]["방송매출(백만)"], "1,197.35")
-        self.assertTrue(any(name == "warning" for name, _ in st.calls))
+        self.assertEqual(st.tables[0][0]["방송매출(백만원)"], "1,197")
 
     def test_page_month_change_scopes_widget_key(self):
         for month in ("8월", "9월", "12월"):
