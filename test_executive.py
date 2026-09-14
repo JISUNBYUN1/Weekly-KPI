@@ -1,7 +1,11 @@
 import json
 from pathlib import Path
 import unittest
-from executive_report import report_rows, strict_sum, render_month_week_analysis, render_product_performance, weeks_for_month
+from executive_report import (
+    AGENCIES, load_star_xlsx, report_rows, render_month_week_analysis,
+    render_product_performance, star_approved_sop_totals, star_overall_totals,
+    star_partner_totals, star_partner_yoy_totals, strict_sum, weeks_for_month,
+)
 
 ROOT = Path(__file__).resolve().parent
 
@@ -47,6 +51,8 @@ class Tests(unittest.TestCase):
         self.assertEqual(ui.metrics[0][1], "42")
         self.assertEqual(ui.metrics[1][1], "1")
         self.assertEqual(ui.metrics[2][1], "1,003,588")
+        self.assertEqual(ui.metrics[3][1], "640")
+        self.assertEqual(ui.metrics[4][1], "410")
         self.assertTrue(ui.charts)
 
     def test_empty_december(self):
@@ -75,6 +81,31 @@ class Tests(unittest.TestCase):
         ui = UI("8월")
         render_product_performance(ui, ROOT)
         self.assertGreaterEqual(len(ui.charts), 2)
+
+    def test_star_partner_exposure_is_limited_to_approved_seven(self):
+        star, errors = load_star_xlsx(ROOT)
+        self.assertFalse(errors)
+        exposed = set()
+        for bucket in star["금액"]["월별"].values():
+            for status in ("실적", "FCST"):
+                exposed.update(bucket[status].get("partner", {}))
+        self.assertEqual(exposed, set(AGENCIES))
+        self.assertNotIn("유니씨앤씨", exposed)
+        self.assertNotIn("(주)클릭나라", exposed)
+        self.assertIn("클릭나라", exposed)
+
+    def test_star_product_total_keeps_full_population(self):
+        star, _ = load_star_xlsx(ROOT)
+        overall = star_overall_totals(star, "월별", "8월")
+        approved_so = star_approved_sop_totals(star, "월별", "8월")["S/O_금액"]
+        self.assertGreater(overall["S/O_금액"], approved_so)
+        self.assertAlmostEqual(overall["S/O_금액"], 40968971651.30801, places=2)
+
+    def test_star_2025_partner_comparison_is_available(self):
+        star, _ = load_star_xlsx(ROOT)
+        previous = star_partner_yoy_totals(star, "월별", "8월", "평강")
+        self.assertNotEqual(previous["S/I_금액"], 0)
+        self.assertNotEqual(previous["S/O_금액"], 0)
 
 if __name__ == "__main__":
     unittest.main()

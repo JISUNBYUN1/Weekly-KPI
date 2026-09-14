@@ -380,7 +380,7 @@ def login_page():
     
     if st.button("입장", use_container_width=True):
         if user_name.strip():
-            st.session_state.user_name = user_name
+            st.session_state.user_name = user_name.strip()
             st.rerun()
         else:
             st.error("이름을 입력해주세요")
@@ -396,11 +396,9 @@ def format_display_value(val):
         if val == 0:
             return "-"
         elif val < 0:
-            if isinstance(val, float) and val > -1:
-                return f"△{abs(val):.1f}%"
-            return f"△{int(abs(val))}" if val == int(val) else f"△{abs(val):.2f}"
+            return f"△{int(abs(val)):,}" if val == int(val) else f"△{abs(val):,.1f}"
         else:
-            return f"{int(val):,}"
+            return f"{int(val):,}" if val == int(val) else f"{val:,.1f}"
     return str(val)
 
 
@@ -601,9 +599,9 @@ def create_affiliate_table(data_dict, title=""):
             if conversion is None or conversion == 0:
                 conv_str = "-"
             elif conversion < 0:
-                conv_str = f"△{abs(conversion):.2f}%"
+                conv_str = f"△{abs(conversion):.1f}%"
             else:
-                conv_str = f"{conversion:.2f}%"
+                conv_str = f"+{conversion:.1f}%"
             html_row += f'<td class="number">{conv_str}</td>'
             html_row += f'<td class="number">{format_display_value(shop.get("주문금액"))}</td>'
             joint = data_item.get("공동구매", {})
@@ -642,11 +640,14 @@ def dashboard():
             ("라이브커머스", "라이브"),
             ("어필리에이트", "어필"),
             ("주간 실적 입력", "거래선입력"),
+            ("입력 데이터 조회", "거래선현황"),
             ("거래선 활동 기록", "거래선기록"),
             ("담당자 피드백", "담당자피드백"),
         ]
         if not is_group_manager:
-            pages = [item for item in pages if item[1] in {"전체", "거래선분석", "거래선기록", "어필"}]
+            pages = [item for item in pages if item[1] in {
+                "전체", "거래선분석", "거래선기록", "거래선입력", "거래선현황", "어필"
+            }]
         
         for emoji_name, page_key in pages:
             if st.button(emoji_name, use_container_width=True, key=f"btn_{page_key}", type="primary" if st.session_state.page == page_key else "secondary"):
@@ -672,6 +673,10 @@ def dashboard():
     feedback_data = load_feedback()
     
     current_page = st.session_state.page
+    partner_pages = {"전체", "거래선분석", "거래선기록", "거래선입력", "거래선현황", "어필"}
+    if not is_group_manager and current_page not in partner_pages:
+        st.session_state.page = "전체"
+        st.rerun()
     
     # 월간ㆍ주간 분석
     if current_page == "전체":
@@ -755,7 +760,7 @@ def dashboard():
         col1, col2, col3 = st.columns(3)
         
         with col1:
-            input_agency = st.selectbox("거래선 선택", AGENCIES, key="input_agency")
+            input_agency = st.selectbox("거래선 선택", allowed_agencies or AGENCIES, key="input_agency")
         
         with col2:
             # 월 선택 (1-12월 동적, 역순)
@@ -803,7 +808,7 @@ def dashboard():
             with col1:
                 sc_orders = st.number_input("상품주문건수", min_value=0, step=1, key="sc_orders_input")
             with col2:
-                sc_amount = st.number_input("주문금액", min_value=0, step=1, key="sc_amount_input")
+                sc_amount = st.number_input("주문금액(원)", min_value=0, step=1, key="sc_amount_input")
             
             sc_activity = st.text_area("📌 마케팅활동", placeholder="쇼핑커넥트 마케팅 활동을 작성해주세요", height=60, key="sc_activity_input")
             
@@ -823,21 +828,17 @@ def dashboard():
             with col1:
                 cj_orders = st.number_input("상품주문건수", min_value=0, step=1, key="cj_orders_input")
             with col2:
-                cj_amount = st.number_input("주문금액", min_value=0, step=1, key="cj_amount_input")
+                cj_amount = st.number_input("주문금액(원)", min_value=0, step=1, key="cj_amount_input")
             
             cj_activity = st.text_area("📌 마케팅활동", placeholder="공동구매 마케팅 활동을 작성해주세요", height=60, key="cj_activity_input")
             
             st.write("---")
             st.subheader("🎥 3️⃣ AI 라이브")
-            col1, col2, col3 = st.columns(3)
+            col1, col2 = st.columns(2)
             with col1:
                 live_count = st.number_input("방송횟수", min_value=0, step=1, key="live_count_input")
             with col2:
-                live_sale = st.number_input("방송매출", min_value=0, step=1, key="live_sale_input")
-            with col3:
-                live_cost = st.number_input("소요비용", min_value=0, step=1, key="live_cost_input")
-            
-            live_activity = st.text_area("📌 마케팅활동", placeholder="AI 라이브 마케팅 활동을 작성해주세요", height=60, key="live_activity_input")
+                live_sale = st.number_input("방송매출(원)", min_value=0, step=1, key="live_sale_input")
             
             st.write("---")
             st.subheader("🎯 당주 주요활동")
@@ -876,21 +877,19 @@ def dashboard():
                             "운영모델수": sc_model,
                             "유입수": sc_visits,
                             "상품주문건수": sc_orders,
-                            "주문금액": sc_amount,
+                            "주문금액": round(sc_amount / 1000000, 2),
                             "마케팅활동": sc_activity
                         },
                         "공동구매": {
                             "크리에이터운영수": cj_creator,
                             "운영모델수": cj_model,
                             "상품주문건수": cj_orders,
-                            "주문금액": cj_amount,
+                            "주문금액": round(cj_amount / 1000000, 2),
                             "마케팅활동": cj_activity
                         },
                         "AI라이브": {
                             "방송횟수": live_count,
-                            "방송매출": live_sale,
-                            "소요비용": live_cost,
-                            "마케팅활동": live_activity
+                            "방송매출": round(live_sale / 1000000, 2)
                         },
                         "당주주요활동": {
                             "AI라이브효율증대": activity_AI라이브효율증대,
@@ -1070,7 +1069,7 @@ def dashboard():
                 weekly_data_list = []
         
         # 거래선별 데이터 필터링
-        selected_agency = st.selectbox("거래선 선택", AGENCIES, key="view_agency")
+        selected_agency = st.selectbox("거래선 선택", allowed_agencies or AGENCIES, key="view_agency")
         
         # 선택한 거래선의 데이터만 필터링
         agency_data = [item for item in weekly_data_list if item.get("거래선") == selected_agency]
@@ -1162,14 +1161,11 @@ def dashboard():
                             # 3. AI 라이브
                             st.write("**🎥 3️⃣ AI 라이브**")
                             live = data.get("AI라이브", {})
-                            col1, col2, col3 = st.columns(3)
+                            col1, col2 = st.columns(2)
                             with col1:
                                 live_count = st.number_input("방송횟수", min_value=0, step=1, value=max(0, live.get('방송횟수', 0)), key=f"edit_live_count_{unique_key}")
                             with col2:
                                 live_sale = st.number_input("방송매출 (전체 금액)", min_value=0, step=1, value=max(0, int(live.get('방송매출', 0) * 1000000)), key=f"edit_live_sale_{unique_key}")
-                            with col3:
-                                live_cost = st.number_input("소요비용 (전체 금액)", min_value=0, step=1, value=max(0, int(live.get('소요비용', 0) * 1000000)), key=f"edit_live_cost_{unique_key}")
-                            live_activity = st.text_area("마케팅활동", value=live.get('마케팅활동', ''), height=40, key=f"edit_live_activity_{unique_key}")
                             
                             st.write("---")
                             
@@ -1198,9 +1194,7 @@ def dashboard():
                                 }
                                 data["AI라이브"] = {
                                     "방송횟수": live_count,
-                                    "방송매출": round(live_sale / 1000000, 2),
-                                    "소요비용": round(live_cost / 1000000, 4),
-                                    "마케팅활동": live_activity
+                                    "방송매출": round(live_sale / 1000000, 2)
                                 }
                                 
                                 # weekly_data.json 업데이트
@@ -1243,7 +1237,7 @@ def dashboard():
                             with col2:
                                 st.metric("유입수", f"{sc.get('유입수', 0):,}")
                                 st.metric("주문", f"{sc.get('상품주문건수', 0)}")
-                            st.metric("금액", f"{sc.get('주문금액', 0):.2f}백만")
+                            st.metric("주문금액(백만원)", f"{sc.get('주문금액', 0):,.0f}")
                             if sc.get("마케팅활동"):
                                 st.caption(f"📌 {sc.get('마케팅활동')}")
                         
@@ -1256,7 +1250,7 @@ def dashboard():
                                 st.metric("모델", f"{cj.get('운영모델수', 0)}")
                             with col2:
                                 st.metric("주문", f"{cj.get('상품주문건수', 0)}")
-                            st.metric("금액", f"{cj.get('주문금액', 0):.2f}백만")
+                            st.metric("주문금액(백만원)", f"{cj.get('주문금액', 0):,.0f}")
                             if cj.get("마케팅활동"):
                                 st.caption(f"📌 {cj.get('마케팅활동')}")
                         
@@ -1265,16 +1259,11 @@ def dashboard():
                         # 3. AI 라이브
                         st.subheader("🎥 3️⃣ AI 라이브")
                         live = data.get("AI라이브", {})
-                        col1, col2, col3 = st.columns(3)
+                        col1, col2 = st.columns(2)
                         with col1:
-                            st.metric("방송횟수", f"{live.get('방송횟수', 0)}")
+                            st.metric("방송횟수(회)", f"{live.get('방송횟수', 0):,}")
                         with col2:
-                            st.metric("방송매출", f"{live.get('방송매출', 0):.2f}백만")
-                        with col3:
-                            st.metric("소요비용", f"{live.get('소요비용', 0):.4f}백만")
-                        
-                        if live.get("마케팅활동"):
-                            st.info(f"📌 **마케팅활동**: {live.get('마케팅활동')}")
+                            st.metric("방송매출(백만원)", f"{live.get('방송매출', 0):,.0f}")
                         
                         st.write("")
                         
@@ -1440,33 +1429,16 @@ def dashboard():
                     st.write("**🎥 AI 라이브**")
                     live = data.get("AI라이브", {})
                     
-                    col_live1, col_live2 = st.columns([2, 1])
-                    
+                    col_live1, col_live2, col_live3 = st.columns(3)
+                    live_count = live.get('방송횟수', 0)
+                    live_sales = live.get('방송매출', 0)
                     with col_live1:
-                        # 테이블
-                        live_cost = live.get('소요비용', 0.1)
-                        live_efficiency = live.get('방송매출', 0) / live_cost if live_cost > 0 else 0
-                        
-                        live_data = {
-                            "항목": ["방송횟수", "방송매출(백만)", "소요비용(백만)", "효율(매출/비용)"],
-                            "값": [
-                                live.get('방송횟수', 0),
-                                f"{live.get('방송매출', 0):.1f}",
-                                f"{live_cost:.2f}",
-                                f"{live_efficiency:.2f}"
-                            ]
-                        }
-                        live_df = pd.DataFrame(live_data)
-                        st.dataframe(live_df, use_container_width=True, hide_index=True)
-                    
+                        st.metric("방송횟수(회)", f"{live_count:,.0f}")
                     with col_live2:
-                        if live.get('방송횟수', 0) > 0:
-                            # 효율 게이지
-                            efficiency_color = "🟢" if live_efficiency > 1 else "🟡" if live_efficiency > 0.5 else "🔴"
-                            st.metric("효율도", f"{live_efficiency:.2f}배", delta=f"{efficiency_color} {'우수' if live_efficiency > 1 else '보통' if live_efficiency > 0.5 else '개선필요'}")
-                    
-                    if live.get("마케팅활동"):
-                        st.info(f"📌 활동: {live.get('마케팅활동')}")
+                        st.metric("방송매출(백만원)", f"{live_sales:,.0f}")
+                    with col_live3:
+                        per_show = live_sales / live_count if live_count else 0
+                        st.metric("회당 매출(백만원)", f"{per_show:,.0f}")
                     
                     st.divider()
                     
@@ -1547,6 +1519,18 @@ def dashboard():
                     st.write("")
         else:
             st.info(f"등록된 데이터가 없습니다")
+
+        st.divider()
+        st.subheader("실적 파일 업로드")
+        st.caption("월간·주간 실적 원본을 등록합니다. 지원 형식: XLSX, XLS, CSV, JSON")
+        uploaded_result = st.file_uploader("실적 파일 선택", type=["xlsx", "xls", "csv", "json"], key="performance_source_upload")
+        if uploaded_result is not None and st.button("파일 저장", use_container_width=True, key="save_performance_source"):
+            try:
+                _, upload_manifest = save_raw_upload(uploaded_result)
+                st.success(f"{uploaded_result.name} 파일을 저장했습니다.")
+                st.dataframe(pd.DataFrame(upload_manifest[-5:]), use_container_width=True, hide_index=True)
+            except (OSError, ValueError) as error:
+                st.error(f"파일 저장 실패: {error}")
 
 # 메인
 if st.session_state.user_name is None:
