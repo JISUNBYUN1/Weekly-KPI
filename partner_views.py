@@ -36,22 +36,28 @@ def _write_json(path, value):
 
 def load_activity_history(root):
     """업로드된 활동 원장을 거래선/주차 단위로 정규화한다."""
-    source = Path(root) / "주차별 거래선활동.xlsx"
-    if not source.exists():
-        return []
-    frame = pd.read_excel(source, header=None)
-    week, period, rows = None, "", []
-    for _, row in frame.iterrows():
-        week_cell, agency_cell = row.iloc[1], row.iloc[2]
-        if isinstance(week_cell, str):
-            match = re.match(r"(\d+)주차\s*\(([^)]+)\)", week_cell)
-            if match:
-                week, period = f"W{int(match.group(1)):02d}", match.group(2)
-        if week and isinstance(agency_cell, str) and agency_cell.strip() in AGENCIES:
-            body = "\n".join(str(value).strip() for value in (row.iloc[4], row.iloc[5])
-                             if isinstance(value, str) and value.strip())
-            if body:
-                rows.append({"거래선": agency_cell.strip(), "주차": week, "기간": period, "주요활동": body})
+    normalized = _read_json(root, "activity_history.json", None)
+    if isinstance(normalized, list):
+        rows = [row for row in normalized
+                if isinstance(row, dict) and row.get("거래선") in AGENCIES
+                and _week_key(row.get("주차"))[0] > 0 and str(row.get("주요활동", "")).strip()]
+    else:
+        source = Path(root) / "주차별 거래선활동.xlsx"
+        if not source.exists():
+            return []
+        frame = pd.read_excel(source, header=None)
+        week, period, rows = None, "", []
+        for _, row in frame.iterrows():
+            week_cell, agency_cell = row.iloc[1], row.iloc[2]
+            if isinstance(week_cell, str):
+                match = re.match(r"(\d+)주차\s*\(([^)]+)\)", week_cell)
+                if match:
+                    week, period = f"W{int(match.group(1)):02d}", match.group(2)
+            if week and isinstance(agency_cell, str) and agency_cell.strip() in AGENCIES:
+                body = "\n".join(str(value).strip() for value in (row.iloc[4], row.iloc[5])
+                                 if isinstance(value, str) and value.strip())
+                if body:
+                    rows.append({"거래선": agency_cell.strip(), "주차": week, "기간": period, "주요활동": body})
     overrides = _read_json(root, "activity_overrides.json", {"edits": {}, "deleted": []})
     deleted = set(overrides.get("deleted", []))
     edits = overrides.get("edits", {})
@@ -163,7 +169,9 @@ def _format_delta(current, previous, unit=""):
 
 
 def _format_value(value):
-    return f"△{abs(value):,.0f}" if _number(value) and value < 0 else f"{value:,.0f}"
+    if not _number(value):
+        return "미제공"
+    return f"△{abs(value):,.0f}" if value < 0 else f"{value:,.0f}"
 
 
 def _activity_highlights(records, limit=5):
@@ -179,12 +187,14 @@ def _activity_highlights(records, limit=5):
     return highlights[:limit]
 
 
-def _linked_recommendations(current, previous, records, label, previous_records=None):
+def _linked_recommendations(current, previous, records, label, previous_records=None,
+                            monthly=False, activity_context=None):
     """기록 활동과 같은 기간의 KPI 방향을 연결해 근거·판단·실행안을 만든다."""
     previous_records = previous_records or []
     source_records = previous_records + records
     activity_text = " ".join(row.get("주요활동", "") for row in source_records)
-    activity_timing = "전기 활동" if previous_records else "당기 활동"
+    activity_timing = activity_context or ("전기 활동" if previous_records else "당기 활동")
+    amount_unit, amount_scale = ("억원", 100) if monthly else ("백만원", 1)
     specs = [
         ("라이브 매출(백만)", "라이브커머스", ("라이브", "방송"), "회당 매출", "성과 상위 시간대·상품 조합으로 1회 재편성"),
         ("어필리에이트 주문금액(백만)", "어필리에이트", ("어필리에이트", "크리에이터", "공동구매", "쇼핑커넥트"), "크리에이터당 주문·전환율", "주문 발생 크리에이터와 재고 보유 상품에 콘텐츠 집중"),
@@ -195,26 +205,54 @@ def _linked_recommendations(current, previous, records, label, previous_records=
         cur, prev = current.get(field, 0), previous.get(field) if previous else None
         delta = cur - prev if _number(prev) else None
         matched = [word for word in keywords if word in activity_text]
+        activity_parts = [re.sub(r"\s+", " ", part).strip(" -·□")
+                          for part in re.split(r"[\n•●▪■▶]|(?<=다)\.", activity_text)
+                          if any(word in part for word in keywords)
+                          and len(re.sub(r"\s+", " ", part).strip(" -·□")) > len(topic) + 2]
+        excerpt = activity_parts[0] if activity_parts else topic
+        excerpt = excerpt if len(excerpt) <= 55 else excerpt[:54] + "…"
         if matched and _number(delta):
             judgment = ("활동과 KPI가 동반 상승해 기여 가능성이 있습니다" if delta > 0 else
                         "활동은 있었지만 KPI 상승으로 연결되지 않아 전환 구간 점검이 필요합니다" if delta < 0 else
                         "활동 이후 KPI가 보합으로, 실행 강도와 대상 적합성을 재검토해야 합니다")
-            evidence = f"{activity_timing} {', '.join(matched[:2])} · {label} {_format_delta(cur, prev, '명' if field == '신규 관심고객' else '백만원')}"
+            scale = 1 if field == "신규 관심고객" else amount_scale
+            unit = "명" if field == "신규 관심고객" else amount_unit
+            evidence = f"{activity_timing} {', '.join(matched[:2])} · {label} {_format_delta(cur / scale, prev / scale, unit)}"
+            if delta > 0:
+                tailored_action = f"‘{excerpt}’ 운영을 유지하되 성과 모델·대상 고객을 기록하고 인접 상품 1개에 제한 확대"
+            elif delta < 0:
+                tailored_action = f"‘{excerpt}’ 실행을 대상·소재·상품별로 분리해 확인 KPI가 낮은 조합을 중단하고, {action}"
+            else:
+                tailored_action = f"‘{excerpt}’의 집행 강도와 대상 적합성을 재점검하고, {action}"
         elif matched:
             judgment = "활동은 확인되지만 비교 실적이 없어 효과 판단을 보류합니다"
             evidence = f"{activity_timing} {', '.join(matched[:2])} · 비교 기준 없음"
+            tailored_action = f"‘{excerpt}’에 목표값과 비교군을 지정해 다음 기간 {kpi}를 측정"
         elif _number(delta) and delta < 0:
             judgment = "KPI 하락 구간에 직접 연결되는 활동 기록이 부족합니다"
-            evidence = f"{label} {_format_delta(cur, prev, '명' if field == '신규 관심고객' else '백만원')}"
+            scale = 1 if field == "신규 관심고객" else amount_scale
+            unit = "명" if field == "신규 관심고객" else amount_unit
+            evidence = f"{label} {_format_delta(cur / scale, prev / scale, unit)}"
+            tailored_action = action
         else:
             continue
         results.append({"영역": topic, "근거": evidence, "판단": judgment,
-                        "차기 실행 제안": action, "확인 KPI": kpi})
+                        "차기 실행 제안": tailored_action, "확인 KPI": kpi})
     if not results:
-        results.append({"영역": "활동 관리", "근거": "활동·비교 KPI 연결 정보 부족",
-                        "판단": "성과 기여 활동을 구분하기 어렵습니다",
-                        "차기 실행 제안": "활동마다 목표 KPI·대상 상품·집행일을 함께 기록",
-                        "확인 KPI": "활동 전후 KPI 증감"})
+        comparable = [(field, topic, kpi, action, current.get(field, 0), previous.get(field))
+                      for field, topic, _, kpi, action in specs if _number(previous.get(field))]
+        if comparable:
+            field, topic, kpi, action, cur, prev = min(comparable, key=lambda item: item[4] - item[5])
+            scale = 1 if field == "신규 관심고객" else amount_scale
+            unit = "명" if field == "신규 관심고객" else amount_unit
+            results.append({"영역": topic, "근거": f"{label} {_format_delta(cur / scale, prev / scale, unit)}",
+                            "판단": "선택 기간 실적 변동 기준 우선 점검 영역",
+                            "차기 실행 제안": action, "확인 KPI": kpi})
+        else:
+            results.append({"영역": "판매 전환", "근거": f"셀아웃 {_format_value(current.get('셀아웃 금액', 0) / (1e8 if monthly else 1e6))}{amount_unit}",
+                            "판단": "현재 실적 기준으로 판매 전환 효율 점검이 우선",
+                            "차기 실행 제안": "셀인 상위·셀아웃 하위 모델을 분리해 재고·가격·노출 우선순위 재설정",
+                            "확인 KPI": "모델별 셀인-셀아웃 차이·재고일수"})
     return results
 
 
@@ -242,13 +280,15 @@ def render_partner_activity(st, root, allowed_agencies):
         trend = []
         for label in trend_weeks:
             totals = star_partner_totals(star_data, "주차별", label, agency)
-            trend.append({"주차": label, "셀인(억원)": totals["S/I_금액"] / 1e8,
-                          "셀아웃(억원)": totals["S/O_금액"] / 1e8})
+            trend.append({"주차": label, "셀인(백만원)": totals["S/I_금액"] / 1e6,
+                          "셀아웃(백만원)": totals["S/O_금액"] / 1e6})
         if trend:
             st.line_chart(pd.DataFrame(trend).set_index("주차"), color=["#164c96", "#66a3ff"], height=240)
-            st.caption(f"STAR 대표거래선 기준 {agency} 셀인·셀아웃 실적입니다.")
+            st.caption(f"STAR 대표거래선 기준 {agency} 주차별 셀인·셀아웃 실적(백만원)입니다.")
 
     st.markdown(f"#### {week} · {row['기간']}")
+    if row.get("수정일시"):
+        st.caption(f"최근 수정: {row['수정일시']}")
     st.write(row["주요활동"])
     override_path = Path(root) / "activity_overrides.json"
     overrides = _read_json(root, "activity_overrides.json", {"edits": {}, "deleted": []})
@@ -296,8 +336,10 @@ def render_partner_analysis(st, root, allowed_agencies, is_group_manager, user_n
             ("신규 관심고객", "누적 관심고객" if monthly else "신규 관심고객", "명", 1)]):
         with column:
             value = current[name]
-            st.metric(f"{title}({unit})", _format_value(value / scale),
-                      delta=f"{_format_delta(value / scale, previous.get(name) / scale if _number(previous.get(name)) else None, unit)} ({label})")
+            displayed = value / scale if _number(value) else None
+            prior_displayed = previous.get(name) / scale if _number(previous.get(name)) else None
+            st.metric(f"{title}({unit})", _format_value(displayed),
+                      delta=f"{_format_delta(displayed, prior_displayed, unit)} ({label})" if _number(displayed) else None)
     peer_rows = [{"거래선": item, **partner_metrics(root, item, month, week, star_data)} for item in AGENCIES]
     peer = pd.DataFrame(peer_rows)
     st.markdown("#### 거래선별 성과 위치")
@@ -308,13 +350,17 @@ def render_partner_analysis(st, root, allowed_agencies, is_group_manager, user_n
         st.bar_chart(star_peer.set_index("거래선"), height=280)
     with right:
         for field, text, unit in [("셀아웃 금액", "셀아웃", amount_unit), ("라이브 매출(백만)", "라이브", amount_unit), ("어필리에이트 주문금액(백만)", "어필리에이트", amount_unit), ("신규 관심고객", "신규 관심고객", "명")]:
-            rank = peer[field].rank(method="min", ascending=False)[peer["거래선"] == agency].iloc[0]
+            rank_value = peer[field].rank(method="min", ascending=False)[peer["거래선"] == agency].iloc[0]
+            if not _number(rank_value) or pd.isna(rank_value) or not _number(current.get(field)):
+                st.write(f"- {text}: 미제공")
+                continue
+            rank = int(rank_value)
             if field in ("셀인 금액", "셀아웃 금액"):
                 display_value, display_unit = current[field] / (1e8 if monthly else 1e6), amount_unit
             else:
                 display_value = current[field] / (amount_scale if "백만" in field else 1)
                 display_unit = amount_unit if "백만" in field else unit
-            st.write(f"- {text}: {int(rank)}위 / {display_value:,.0f}{display_unit}")
+            st.write(f"- {text}: {rank}위 / {_format_value(display_value)}{display_unit}")
     if star_data:
         star_scope_type = "월별" if monthly else "주차별"
         star_scope = month if monthly else business_week_to_star_label(week)
@@ -324,29 +370,44 @@ def render_partner_analysis(st, root, allowed_agencies, is_group_manager, user_n
         for label_name, current_key, yoy_key in (("셀인", "셀인 금액", "S/I_금액"), ("셀아웃", "셀아웃 금액", "S/O_금액")):
             current_value, previous_year = current[current_key], yoy[yoy_key]
             change = (current_value - previous_year) / previous_year * 100 if previous_year else None
-            yoy_rows.append({"지표": label_name, "2026 실적": _format_value(current_value / scale),
-                             "2025 동기간": _format_value(previous_year / scale),
+            yoy_rows.append({"지표": label_name,
+                             f"2026 실적({amount_unit})": _format_value(current_value / scale),
+                             f"2025 동기간({amount_unit})": _format_value(previous_year / scale),
                              "전년비(%)": f"+{change:.1f}" if _number(change) and change > 0 else f"△{abs(change):.1f}" if _number(change) and change < 0 else "0.0" if change == 0 else "N/A"})
         st.dataframe(pd.DataFrame(yoy_rows), use_container_width=True, hide_index=True)
     if star_errors:
         st.caption(" · ".join(star_errors))
+    history = load_activity_history(root)
     valid_weeks = {value.rstrip("AB") for value in weeks_for_month(calendar, month)}
-    records = [row for row in load_activity_history(root) if row["거래선"] == agency and
+    records = [row for row in history if row["거래선"] == agency and
                ((week == "월간" and row["주차"].rstrip("AB") in valid_weeks) or
                 row["주차"].rstrip("AB") == week.rstrip("AB"))]
-    previous_records = [row for row in load_activity_history(root) if row["거래선"] == agency and prev_week and
+    previous_records = [row for row in history if row["거래선"] == agency and prev_week and
                         row["주차"].rstrip("AB") == prev_week.rstrip("AB")]
+    analysis_records = records
+    activity_context = None
+    if not analysis_records:
+        cutoff = max((_week_key(value)[0] for value in (valid_weeks if week == "월간" else [week])), default=99)
+        eligible = [row for row in history if row["거래선"] == agency and _week_key(row["주차"])[0] <= cutoff]
+        if eligible:
+            latest_week = max(eligible, key=lambda row: _week_key(row["주차"]))["주차"]
+            analysis_records = [row for row in eligible if row["주차"] == latest_week]
+            activity_context = f"최근 {latest_week} 활동"
     st.markdown("#### 선택 기간 활동 핵심 요약")
-    highlights = _activity_highlights(records)
+    highlights = _activity_highlights(analysis_records)
     if highlights:
+        if not records:
+            st.caption(f"선택 기간의 직접 기록이 없어 {activity_context}을 참고합니다.")
         for item in highlights:
             st.markdown(f"- {item}")
     else:
-        st.info("선택 기간에 기록된 활동이 없습니다.")
+        st.info("연결 가능한 활동 기록이 없어 실적 변동을 기준으로 제안합니다.")
 
     st.markdown("#### 활동–실적 연계 분석 및 실행 제언")
     st.caption("동일 기간의 활동과 실적 방향을 함께 관찰한 결과이며, 직접적인 인과로 단정하지 않습니다.")
-    recommendation_rows = _linked_recommendations(current, previous, records, label, previous_records)
+    recommendation_rows = _linked_recommendations(
+        current, previous, analysis_records, label, previous_records,
+        monthly=monthly, activity_context=activity_context)
     if star_data and previous:
         current_scope = month if monthly else business_week_to_star_label(week)
         previous_scope = prev_month if monthly else business_week_to_star_label(prev_week)
@@ -388,9 +449,9 @@ def render_partner_analysis(st, root, allowed_agencies, is_group_manager, user_n
             })
     recommendation_df = pd.DataFrame(recommendation_rows)
     st.dataframe(recommendation_df, use_container_width=True, hide_index=True)
-    if records:
-        with st.expander("선택 기간의 활동 기록", expanded=False):
-            for row in records:
+    if analysis_records:
+        with st.expander("선택 기간의 활동 기록" if records else f"참고 활동 기록 · {activity_context}", expanded=False):
+            for row in analysis_records:
                 st.write(f"**{row['주차']} · {row['기간']}**")
                 st.write(row["주요활동"])
     comments = _read_json(root, "manager_comments.json", {})

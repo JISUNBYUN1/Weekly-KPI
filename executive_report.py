@@ -624,6 +624,144 @@ def star_partner_product_totals(star_data, scope_type, scope_value, agency, unit
     return combined
 
 
+def _latest_activity(weekly, agency, activity_scope):
+    """선택 기간 활동을 우선 사용하고 없으면 가장 가까운 과거 활동을 반환한다."""
+    selected = activities(weekly, agency, activity_scope)
+    if selected:
+        return selected, "선택 기간"
+    all_rows = activities(weekly, agency, None)
+    if not all_rows:
+        return [], "실적 기준"
+
+    def key(item):
+        match = re.search(r"(\d+)", str(item[0]))
+        return int(match.group(1)) if match else -1
+
+    cutoff_values = activity_scope if isinstance(activity_scope, (set, list, tuple)) else [activity_scope]
+    cutoffs = [key((value, "", "")) for value in cutoff_values if value]
+    cutoff = max(cutoffs) if cutoffs else 99
+    eligible = [item for item in all_rows if key(item) <= cutoff] or all_rows
+    latest_week = max(eligible, key=key)[0]
+    return [item for item in eligible if item[0] == latest_week], f"최근 {latest_week}"
+
+
+def _brief_activity(activity_rows, limit=58, keywords=()):
+    if not activity_rows:
+        return "활동 기록 미연결"
+    raw = "\n".join(item[2] for item in activity_rows)
+    parts = [re.sub(r"\s+", " ", part).strip(" -·□")
+             for part in re.split(r"[\n•●▪■▶]|(?<=다)\.", raw) if part.strip(" -·□")]
+    matched = [part for part in parts if any(word in part for word in keywords)]
+    sentence = (matched or parts or [re.sub(r"\s+", " ", raw).strip(" -·□")])[0]
+    return sentence if len(sentence) <= limit else sentence[:limit - 1] + "…"
+
+
+def tailored_sop_actions(star_data, scope_type, scope_value, prev_scope_value,
+                         rows, previous_rows, weekly, activity_scope, monthly):
+    """7개 SOP 거래선의 실제 실적·품목·활동에 따라 서로 다른 우선 실행안을 만든다."""
+    current_map = {row["거래선"]: row for row in rows}
+    previous_map = {row["거래선"]: row for row in previous_rows}
+    unit, scale = ("억원", 1e8) if monthly else ("백만원", 1e6)
+    output = []
+
+    for agency in AGENCIES:
+        star = star_partner_totals(star_data, scope_type, scope_value, agency)
+        prior_star = star_partner_totals(star_data, scope_type, prev_scope_value, agency) if prev_scope_value else None
+        so_delta = star["S/O_금액"] - prior_star["S/O_금액"] if prior_star else None
+        gap = star["S/I_금액"] - star["S/O_금액"]
+        current = current_map.get(agency, {})
+        previous = previous_map.get(agency, {})
+        live_delta = (current.get("라이브 매출(백만)") - previous.get("라이브 매출(백만)")
+                      if number(current.get("라이브 매출(백만)")) and number(previous.get("라이브 매출(백만)")) else None)
+        affiliate_delta = (current.get("어필리에이트 주문금액(백만)") - previous.get("어필리에이트 주문금액(백만)")
+                           if number(current.get("어필리에이트 주문금액(백만)")) and number(previous.get("어필리에이트 주문금액(백만)")) else None)
+        interest_delta = (current.get("신규 관심고객") - previous.get("신규 관심고객")
+                          if number(current.get("신규 관심고객")) and number(previous.get("신규 관심고객")) else None)
+
+        current_products = star_partner_product_totals(star_data, scope_type, scope_value, agency)
+        prior_products = star_partner_product_totals(star_data, scope_type, prev_scope_value, agency) if prev_scope_value else {}
+        product_deltas = [(product, values.get("S/O", 0) - prior_products.get(product, {}).get("S/O", 0))
+                          for product, values in current_products.items()]
+        weakest = min(product_deltas, key=lambda item: item[1]) if product_deltas else ("주력 품목", 0)
+        strongest = max(product_deltas, key=lambda item: item[1]) if product_deltas else ("주력 품목", 0)
+
+        activity_rows, activity_period = _latest_activity(weekly, agency, activity_scope)
+        if not monthly and prev_scope_value:
+            match = re.fullmatch(r"(\d{1,2})주([AB]?)", str(prev_scope_value))
+            previous_activity_week = f"W{int(match.group(1)):02d}{match.group(2)}" if match else None
+            previous_activity_rows = activities(weekly, agency, previous_activity_week) if previous_activity_week else []
+            if previous_activity_rows:
+                activity_rows, activity_period = previous_activity_rows, f"전주 {previous_activity_week}"
+        activity_text = " ".join(item[2] for item in activity_rows)
+        activity_brief = _brief_activity(activity_rows)
+
+        rates = {}
+        for key, current_value, previous_value in (
+                ("라이브", current.get("라이브 매출(백만)"), previous.get("라이브 매출(백만)")),
+                ("어필리에이트", current.get("어필리에이트 주문금액(백만)"), previous.get("어필리에이트 주문금액(백만)")),
+                ("관심고객", current.get("신규 관심고객"), previous.get("신규 관심고객"))):
+            if number(current_value) and number(previous_value) and previous_value > 0:
+                rates[key] = (current_value - previous_value) / previous_value
+        priority = min(rates, key=rates.get) if rates and min(rates.values()) <= -0.5 else None
+        if number(current.get("어필리에이트 주문금액(백만)")) and current.get("어필리에이트 주문금액(백만)") < 0:
+            priority = "어필리에이트"
+        elif number(current.get("신규 관심고객")) and current.get("신규 관심고객") < 0:
+            priority = "관심고객"
+
+        priority_keywords = {
+            "어필리에이트": ("어필리에이트", "쇼핑커넥트", "공동구매", "크리에이터"),
+            "관심고객": ("관심", "쿠폰", "알림", "GFA", "SA", "광고", "콘텐츠"),
+            "라이브": ("라이브", "방송"),
+        }.get(priority, (weakest[0], "가격", "재고", "프로모션"))
+        activity_brief = _brief_activity(activity_rows, keywords=priority_keywords)
+
+        if priority == "어필리에이트":
+            change = affiliate_delta / (100 if monthly else 1) if number(affiliate_delta) else 0
+            signal = f"어필리에이트 {fmt_delta(change, '억원' if monthly else '백만원')}"
+            if current.get("어필리에이트 주문금액(백만)", 0) < 0:
+                action = f"{activity_brief} 관련 주문을 크리에이터·상품별 순매출로 재산출하고 취소·환불 상위 원인 3개를 제거한 뒤 재집행"
+                kpi = "순주문금액·취소율·출고율"
+            elif "크리에이터" in activity_text or "쇼핑커넥트" in activity_text:
+                action = f"{activity_brief} 캠페인의 크리에이터별 주문을 비교해 무주문 콘텐츠를 중단하고 상위 20% 크리에이터에 {strongest[0]} 집중"
+                kpi = "크리에이터당 주문·콘텐츠별 전환율"
+            else:
+                action = f"{activity_brief} 활동을 채널·상품별 주문으로 분리해 전환이 확인된 조합에만 다음 기간 예산 배정"
+                kpi = "채널별 주문금액·유입 대비 전환율"
+        elif priority == "관심고객":
+            signal = f"관심고객 {fmt_delta(interest_delta or 0, '명')} · 감소 기여 {weakest[0]}"
+            if "쿠폰" in activity_text or "알림" in activity_text:
+                action = f"{activity_brief}의 발급 수·사용 수·신규구매를 분리해 사용률이 낮은 쿠폰은 금액/대상을 재설계하고 {weakest[0]} 랜딩으로 연결"
+                kpi = "신규 관심고객·쿠폰 사용률·신규구매 전환율"
+            elif any(word in activity_text for word in ("GFA", "SA", "광고")):
+                action = f"{activity_brief} 광고를 소재·키워드별로 분리해 관심고객 획득단가가 낮은 세트만 유지하고 {weakest[0]} 구매전환까지 추적"
+                kpi = "관심고객 획득단가·CTR·신규구매 전환율"
+            else:
+                action = f"{activity_brief} 콘텐츠의 유입→관심→구매 퍼널을 측정하고 이탈이 큰 단계의 소재와 랜딩을 교체"
+                kpi = "신규 관심고객·상세 유입·구매 전환율"
+        elif priority == "라이브":
+            signal = f"라이브 매출 {fmt_delta(live_delta / (100 if monthly else 1), '억원' if monthly else '백만원')}"
+            action = f"{activity_brief} 회차를 상품·시간대별로 재분류해 회당 매출 하위 편성을 축소하고 {strongest[0]} 중심 상위 편성을 1회 확대"
+            kpi = "회당 매출·방송 유입·주문 전환율"
+        elif number(so_delta) and so_delta < 0:
+            signal = f"셀아웃 {fmt_delta(so_delta / scale, unit)} · 감소 기여 {weakest[0]}"
+            action = f"{weakest[0]} 하락 SKU의 가격·재고·노출 변화를 대조하고, {activity_brief} 활동 중 해당 SKU 주문으로 연결된 소재만 유지"
+            kpi = f"{weakest[0]} 셀아웃·재고일수·구매전환율"
+        elif star["S/I_금액"] > 0 and gap / star["S/I_금액"] >= 0.25:
+            signal = f"셀인-셀아웃 차이 {fmt_delta(gap / scale, unit)} · 판매전환 점검"
+            action = f"셀인 상위·셀아웃 하위 모델을 추려 {activity_brief} 활동의 노출 대상을 해당 재고 모델로 재배치"
+            kpi = "모델별 셀인-셀아웃 차이·재고일수"
+        else:
+            signal = f"셀아웃 {fmt_delta((so_delta or 0) / scale, unit)} · 성장 기여 {strongest[0]}"
+            action = f"{strongest[0]}의 성과 모델·혜택 조합을 유지하고, {activity_brief} 운영안을 인접 품목 1개에 제한 확대"
+            kpi = f"{strongest[0]} 모델별 셀아웃·확대 품목 전환율"
+
+        output.append({"거래선": agency, "핵심 신호": signal,
+                       "활동 근거": f"{activity_period} · {activity_brief}",
+                       "차주 실행 제안" if not monthly else "차월 실행 제안": action,
+                       "확인 KPI": kpi})
+    return output
+
+
 def benchmark_insights(rows, weekly=None, week_scope=None, monthly=False):
     """거래선 간 특이값(1위/최하위)을 찾아 (관찰 리스트, 상세 제언 리스트)로 반환.
     상세 제언은 1위 거래선의 실제 기록 활동(weekly_data.json)이 있으면 그 내용을 인용해
@@ -665,7 +803,7 @@ def benchmark_insights(rows, weekly=None, week_scope=None, monthly=False):
         observations.append(f"라이브 선도 거래선 **{top_name}** {fmt_amount(top_val / amount_scale, amount_unit, 0)} · 회당 {fmt_amount(top_eff, '백만원', 0) if number(top_eff) else 'N/A'}")
         observations.append(f"라이브 개선 거래선 **{bottom_name}** {fmt_amount(bottom_val / amount_scale, amount_unit, 0)} · 회당 {fmt_amount(bottom_eff, '백만원', 0) if number(bottom_eff) else 'N/A'}")
         proposals.append(detailed_proposal(top_name, bottom_name, "라이브 매출",
-                                            fmt_delta(top_val - bottom_val, "백만원", 0),
+                                            fmt_delta((top_val - bottom_val) / amount_scale, amount_unit, 0),
                                             "상위 거래선의 고효율 편성 시간대·상품 구성을 한 회차에 복제",
                                             "회당 매출·방송 유입·주문 전환율"))
 
@@ -679,7 +817,7 @@ def benchmark_insights(rows, weekly=None, week_scope=None, monthly=False):
         observations.append(f"어필리에이트 선도 거래선 **{top_name}** {top_text}")
         observations.append(f"어필리에이트 개선 거래선 **{bottom_name}** {bottom_text}")
         proposals.append(detailed_proposal(top_name, bottom_name, "어필리에이트 주문금액",
-                                            fmt_delta(top_val - bottom_val, "백만원", 0),
+                                            fmt_delta((top_val - bottom_val) / amount_scale, amount_unit, 0),
                                             "주문 발생 크리에이터·상품 조합을 선별해 콘텐츠 발행을 집중",
                                             "크리에이터당 주문·유입 대비 전환율·취소율"))
 
@@ -729,10 +867,12 @@ def star_benchmark_insights(star_data, scope_type, scope_value, prev_scope_value
     return observations, proposals
 
 
-def performance_diagnostics(rows, previous_rows, live_data, affiliate_data, activity_records, activity_scope):
+def performance_diagnostics(rows, previous_rows, live_data, affiliate_data, activity_records, activity_scope,
+                            monthly=False):
     """거래선별 성과 편차를 채널 특성에 맞는 근거·실행안으로 변환한다."""
     result = []
     previous_map = {row["거래선"]: row for row in previous_rows}
+    amount_unit, amount_scale = ("억원", 100) if monthly else ("백만원", 1)
 
     live_efficiency = []
     for row in rows:
@@ -745,13 +885,13 @@ def performance_diagnostics(rows, previous_rows, live_data, affiliate_data, acti
         top = live_efficiency[0]
         low = live_efficiency[-1]
         result.append({"영역": "라이브 효율", "거래선": top[0],
-                       "진단 근거": f"회당 {top[1]:,.1f}백만원 · {top[3]:,.0f}회 · 총 {top[2]:,.0f}백만원",
+                       "진단 근거": f"회당 {top[1]:,.0f}백만원 · {top[3]:,.0f}회 · 총 {top[2] / amount_scale:,.0f}{amount_unit}",
                        "해석": "방송 횟수보다 회차별 상품·시간대 효율이 우수",
                        "실행 제언": f"{top[0]}의 고매출 회차 상품·시간대를 표준안으로 정리해 {low[0]}에 1회 시험 적용",
                        "확인 KPI": "회당 매출·방송 유입·주문 전환율"})
         if low[0] != top[0]:
             result.append({"영역": "라이브 개선", "거래선": low[0],
-                           "진단 근거": f"회당 {low[1]:,.1f}백만원 · 선도 거래선 대비 △{top[1]-low[1]:,.1f}백만원",
+                           "진단 근거": f"회당 {low[1]:,.0f}백만원 · 선도 거래선 대비 △{top[1]-low[1]:,.0f}백만원",
                            "해석": "편성 확대보다 저효율 회차 구조 개선이 우선",
                            "실행 제언": "매출 하위 시간대 1개를 중단하고 선도 거래선의 상품 구성으로 대체",
                            "확인 KPI": "회당 매출 +10%·저효율 회차 비중"})
@@ -771,13 +911,13 @@ def performance_diagnostics(rows, previous_rows, live_data, affiliate_data, acti
         dominant = "쇼핑커넥트" if top[2] >= top[3] else "공동구매"
         share = max(top[2], top[3]) / top[1] * 100 if top[1] else 0
         result.append({"영역": "어필리에이트", "거래선": top[0],
-                       "진단 근거": f"총 {top[1]:,.0f}백만원 · {dominant} 비중 {share:.1f}%",
+                       "진단 근거": f"총 {top[1] / amount_scale:,.0f}{amount_unit} · {dominant} 비중 {share:.1f}%",
                        "해석": f"{dominant} 중심으로 주문금액을 견인",
                        "실행 제언": f"{top[0]}의 주문 발생 크리에이터·상품 조합을 추출해 {low[0]} 캠페인 후보로 전달",
                        "확인 KPI": "크리에이터당 주문·채널별 주문금액"})
         if low[1] <= 0:
             result.append({"영역": "어필리에이트 개선", "거래선": low[0],
-                           "진단 근거": f"전체 주문금액 {low[1]:,.0f}백만원",
+                           "진단 근거": f"전체 주문금액 {'△' if low[1] < 0 else ''}{abs(low[1] / amount_scale):,.0f}{amount_unit}",
                            "해석": "신규 판매보다 취소·환불 또는 정산 조정 영향 점검 필요",
                            "실행 제언": "음수 주문을 크리에이터·상품별로 분리하고 취소 원인 상위 3개를 차주 조치",
                            "확인 KPI": "순주문금액·취소율·출고율"})
@@ -786,16 +926,16 @@ def performance_diagnostics(rows, previous_rows, live_data, affiliate_data, acti
     if smart_values:
         smart_values.sort(key=lambda item: item[1], reverse=True)
         top, low = smart_values[0], smart_values[-1]
-        top_acts = activities(activity_records, top[0], activity_scope)
-        low_acts = activities(activity_records, low[0], activity_scope)
-        top_activity = re.sub(r"\s+", " ", top_acts[-1][2])[:70] + "…" if top_acts else "활동 기록 없음"
+        top_acts, top_period = _latest_activity(activity_records, top[0], activity_scope)
+        low_acts, low_period = _latest_activity(activity_records, low[0], activity_scope)
+        top_activity = _brief_activity(top_acts, 70, ("관심", "쿠폰", "알림", "광고", "유입"))
         result.append({"영역": "관심고객", "거래선": top[0],
-                       "진단 근거": f"당기 {fmt_delta(top[1], '명')} · 기록 ‘{top_activity}’",
+                       "진단 근거": f"당기 {fmt_delta(top[1], '명')} · {top_period} ‘{top_activity}’",
                        "해석": "고객 유입 활동과 순증이 같은 기간에 관찰됨",
                        "실행 제언": f"{top[0]} 활동의 쿠폰·소재·노출채널을 분리해 다른 거래선에 1개씩 적용",
                        "확인 KPI": "신규 관심고객·신규구매 전환율"})
         if low[1] < 0:
-            low_note = "활동 기록 있음" if low_acts else "직접 활동 기록 없음"
+            low_note = f"{low_period} ‘{_brief_activity(low_acts, 60, ('관심', '쿠폰', '알림', '광고', '유입'))}’"
             result.append({"영역": "관심고객 개선", "거래선": low[0],
                            "진단 근거": f"당기 {fmt_delta(low[1], '명')} · {low_note}",
                            "해석": "신규 유입보다 관심고객 이탈이 큰 상태",
@@ -841,6 +981,13 @@ def activities(records, agency, week=None):
 
 def load_historical_activities(root):
     """누적 활동 원장을 weekly_data와 같은 분석 입력 형태로 변환한다."""
+    normalized = read_json(root, "activity_history.json", [], [])
+    if isinstance(normalized, list) and normalized:
+        return [{"거래선": row.get("거래선"), "주차": row.get("주차"),
+                 "주차_표시": row.get("주차"),
+                 "당주주요활동": {"누적활동": str(row.get("주요활동", "")).strip()}}
+                for row in normalized if isinstance(row, dict)
+                and row.get("거래선") in AGENCIES and str(row.get("주요활동", "")).strip()]
     path = Path(root) / "주차별 거래선활동.xlsx"
     if not path.exists():
         return []
@@ -863,31 +1010,6 @@ def load_historical_activities(root):
                 rows.append({"거래선": agency_cell.strip(), "주차": week, "주차_표시": week,
                              "당주주요활동": {"누적활동": body}})
     return rows
-
-
-def infer(agency, row, weekly_smart, activity_rows, scope):
-    """줄글 대신 '지표 +값' 형태의 리포트형 관찰/제안을 생성."""
-    observations, proposals = [], []
-    if number(row["라이브 매출(백만)"]) and row["라이브 매출(백만)"] > 0:
-        observations.append(f"라이브 매출 {fmt_amount(row['라이브 매출(백만)'], '백만원', 1)}")
-        proposals.append("방송 횟수·시간대·상품 구성 기록으로 회차당 매출 비교")
-    if number(row["어필리에이트 주문금액(백만)"]) and row["어필리에이트 주문금액(백만)"] > 0:
-        observations.append(f"어필리에이트 주문금액 {fmt_amount(row['어필리에이트 주문금액(백만)'], '백만원', 1)}")
-        proposals.append("채널별 유입·주문·금액 기록으로 전환 개선 판단")
-    if number(row["신규 관심고객"]):
-        observations.append(f"신규 관심고객 {fmt_delta(row['신규 관심고객'], '명')}")
-        if row["신규 관심고객"] <= 0:
-            proposals.append("관심고객 감소 원인·유입 경로 점검 및 회복 목표 설정")
-    change = weekly_smart.get("전주비") if isinstance(weekly_smart, dict) else None
-    if number(change):
-        observations.append(f"신규 관심고객 전주비 {fmt_delta(change, '%', 1)}")
-    if activity_rows:
-        labels = ", ".join(dict.fromkeys(channel for _, channel, _ in activity_rows))
-        observations.append(f"기록 활동: {labels}")
-        proposals.append("차주에도 활동별 목표 지표·결과 함께 기록")
-    else:
-        proposals.append("차주 활동·목표 지표·결과 입력으로 성과 분석 근거 확보")
-    return observations, list(dict.fromkeys(proposals))
 
 
 def _period_totals(live, affiliate, smart, month, calendar, monthly, selected_week):
@@ -991,7 +1113,7 @@ def render_month_week_analysis(st, root):
         ("어필리에이트 주문금액", totals[1], prev_totals[1], money_unit, money_scale),
         (("스마트스토어 누적 관심고객" if monthly else "스마트스토어 신규 관심고객"), totals[2], prev_totals[2], "명", 1),
     ]
-    for col, (label, value, prev_value, unit, scale) in zip(metric_cols[:3], metric_specs):
+    for col, (label, value, prev_value, unit, scale) in zip(metric_cols[2:], metric_specs):
         with col:
             displayed = value / scale if number(value) else None
             if unit == "명":
@@ -1016,10 +1138,15 @@ def render_month_week_analysis(st, root):
         so_amt = cur_totals["S/O_금액"] / star_scale
         si_delta = _pct_change(cur_totals["S/I_금액"], star_prev_totals["S/I_금액"]) if star_prev_totals else None
         so_delta = _pct_change(cur_totals["S/O_금액"], star_prev_totals["S/O_금액"]) if star_prev_totals else None
-        with metric_cols[3]:
+        with metric_cols[0]:
             st.metric(f"셀인 실적({star_unit})", f"{si_amt:,.0f}", delta=f"{_fmt_pct(si_delta)}% ({change_label})" if number(si_delta) else None)
-        with metric_cols[4]:
+        with metric_cols[1]:
             st.metric(f"셀아웃 실적({star_unit})", f"{so_amt:,.0f}", delta=f"{_fmt_pct(so_delta)}% ({change_label})" if number(so_delta) else None)
+    else:
+        with metric_cols[0]:
+            st.metric("셀인 실적", "미제공")
+        with metric_cols[1]:
+            st.metric("셀아웃 실적", "미제공")
     st.caption(f"셀인·셀아웃은 품목 기준 전체 4개 채널(SOP·쿠팡·종합몰·홈쇼핑) 합계입니다. 모든 증감은 {change_label} 기준이며, 월 누계 금액은 억원, 주간 금액은 백만원으로 표시합니다.")
 
     # 요약(써머리) — 거래선/품목 벤치마킹 인사이트: 특이 거래선·품목을 짚고 실행 가능한 제언을 제시
@@ -1121,6 +1248,12 @@ def render_month_week_analysis(st, root):
                         + (f", {driver[0]} 감소 기여가 가장 큼 · " if driver[1] < 0 else " · ")
                         + f"**제안** 감소 품목의 재고·가격·광고 노출을 모델 단위로 점검하고, {top_partner['거래선']}의 상위 판매 품목 운영안을 비교 적용 · "
                           "**확인 KPI** 품목별 셀아웃·셀인-셀아웃 차이·재고일수")
+
+            st.markdown("**거래선별 맞춤 실행안**")
+            tailored_rows = tailored_sop_actions(
+                star_data, partner_scope_type, partner_scope, partner_prev_scope,
+                rows, previous_rows, weekly, week_scope_for_activity, monthly)
+            st.dataframe(pd.DataFrame(tailored_rows), use_container_width=True, hide_index=True)
     if observations:
         st.markdown("**핵심 변동 및 확인 포인트**")
         for line in observations:
@@ -1129,7 +1262,7 @@ def render_month_week_analysis(st, root):
         st.info("비교 가능한 데이터가 부족합니다.")
 
     diagnostics = performance_diagnostics(rows, previous_rows, live_data, affiliate_data,
-                                          weekly, week_scope_for_activity)
+                                          weekly, week_scope_for_activity, monthly)
     if diagnostics:
         st.markdown("**채널별 비교 분석 요약**")
         st.dataframe(pd.DataFrame(diagnostics), use_container_width=True, hide_index=True)
@@ -1146,8 +1279,14 @@ def render_month_week_analysis(st, root):
         st.subheader("거래선별 성과 편차")
         chart_left, chart_right = st.columns(2)
         with chart_left:
-            st.caption("라이브·어필리에이트 주문금액 비교")
-            st.bar_chart(signal_df.set_index("거래선")[["라이브 매출(백만)", "어필리에이트 주문금액(백만)"]], height=270)
+            comparison_chart = signal_df.set_index("거래선")[["라이브 매출(백만)", "어필리에이트 주문금액(백만)"]].copy()
+            if monthly:
+                comparison_chart = comparison_chart / 100
+                comparison_chart.columns = ["라이브 매출(억원)", "어필리에이트 주문금액(억원)"]
+            else:
+                comparison_chart.columns = ["라이브 매출(백만원)", "어필리에이트 주문금액(백만원)"]
+            st.caption(f"라이브·어필리에이트 주문금액 비교({'억원' if monthly else '백만원'})")
+            st.bar_chart(comparison_chart, height=270)
         with chart_right:
             st.caption("스마트스토어 신규 관심고객 비교")
             st.bar_chart(signal_df.set_index("거래선")[["신규 관심고객"]], height=270)
@@ -1157,8 +1296,11 @@ def render_month_week_analysis(st, root):
             if not valid.empty and valid[field].sum() > 0:
                 top = valid.loc[valid[field].idxmax()]
                 low = valid.loc[valid[field].idxmin()]
-                exception_rows.append({"지표": label, "상위 거래선": top["거래선"], "상위 값": f"{top[field]:,.1f}",
-                                       "확인 거래선": low["거래선"], "확인 값": f"{low[field]:,.1f}"})
+                monetary = field != "신규 관심고객"
+                scale = 100 if monthly and monetary else 1
+                unit = "억원" if monthly and monetary else "백만원" if monetary else "명"
+                exception_rows.append({"지표": label, "상위 거래선": top["거래선"], "상위 값": f"{top[field] / scale:,.0f}{unit}",
+                                       "확인 거래선": low["거래선"], "확인 값": f"{low[field] / scale:,.0f}{unit}"})
         if exception_rows:
             st.dataframe(pd.DataFrame(exception_rows), use_container_width=True, hide_index=True)
     if errors:
@@ -1166,58 +1308,6 @@ def render_month_week_analysis(st, root):
             for error in errors:
                 st.warning(error)
     return
-
-    st.subheader("채널별 비교 분석")
-    display = []
-    for row in rows:
-        item = {key: value if key == "거래선" else shown(value, 2 if "백만" in key else 0) for key, value in row.items()}
-        activity_rows = activities(weekly, row["거래선"], None if monthly else selected_week)
-        row_observations, _ = infer(row["거래선"], row, smart_data.get(row["거래선"], {}), activity_rows, scope)
-        item["요약"] = " · ".join(row_observations[:3]) if row_observations else "제공된 지표가 없습니다."
-        display.append(item)
-    st.dataframe(pd.DataFrame(display), use_container_width=True, hide_index=True)
-
-    st.subheader("월간·주간 활동 분석")
-    st.caption("활동과 실적이 같은 기간에 기록됐다는 관찰을 보여줍니다. 활동이 실적을 만들었다고 단정하지 않습니다.")
-    for agency in AGENCIES:
-        row = next(row for row in rows if row["거래선"] == agency)
-        activity_rows = activities(weekly, agency, None if monthly else selected_week)
-        observations, proposals = infer(agency, row, smart_data.get(agency, {}), activity_rows, scope)
-        with st.expander(f"{agency} 분석"):
-            st.write("**분석 요약**")
-            for value in observations:
-                st.write("• " + value)
-            if activity_rows:
-                st.write("**기록 활동**")
-                for week, channel, value in activity_rows:
-                    st.text(f"{week} / {channel}\n{value}")
-            st.write("**다음 기간 제안**")
-            for value in proposals:
-                st.write("• " + value)
-
-    st.subheader("거래선별 Action Item")
-    target = st.selectbox("거래선 선택", AGENCIES, key=f"action_agency_{month}_{selected_week}")
-    row = next(row for row in rows if row["거래선"] == target)
-    _, proposals = infer(target, row, smart_data.get(target, {}), activities(weekly, target, None if monthly else selected_week), scope)
-
-    # 벤치마킹 인사이트 중 이 거래선(최하위)에 해당하는 항목을 최우선 Action Item으로 추가
-    bench_proposals = []
-    valid = [(r["거래선"], r["라이브 매출(백만)"]) for r in rows if number(r["라이브 매출(백만)"])]
-    if len(valid) >= 2:
-        valid.sort(key=lambda x: x[1], reverse=True)
-        if valid[-1][0] == target:
-            bench_proposals.append(f"{valid[0][0]} 대비 라이브 매출 최하위 — 방송 횟수·편성 전략 벤치마킹")
-    valid2 = [(r["거래선"], r["신규 관심고객"]) for r in rows if number(r["신규 관심고객"])]
-    if len(valid2) >= 2:
-        valid2.sort(key=lambda x: x[1], reverse=True)
-        if valid2[-1][0] == target:
-            bench_proposals.append(f"{valid2[0][0]} 대비 신규 관심고객 최하위 — 유입 활동 벤치마킹")
-    proposals = bench_proposals + [p for p in proposals if p not in bench_proposals]
-
-    st.dataframe(pd.DataFrame([{"우선순위": index + 1, "Action Item": value, "대상 기간": "차월" if monthly else "차주"} for index, value in enumerate(proposals)]), use_container_width=True, hide_index=True)
-    if errors:
-        with st.expander("데이터 읽기 안내"):
-            for error in errors: st.error(error)
 
 
 def collect_product_data(root):

@@ -1232,11 +1232,11 @@ def dashboard():
                             st.write("🔹 **쇼핑커넥트**")
                             col1, col2 = st.columns(2)
                             with col1:
-                                st.metric("크리에이터", f"{sc.get('크리에이터운영수', 0)}")
-                                st.metric("모델", f"{sc.get('운영모델수', 0)}")
+                                st.metric("크리에이터", f"{sc.get('크리에이터운영수', 0):,}")
+                                st.metric("모델", f"{sc.get('운영모델수', 0):,}")
                             with col2:
                                 st.metric("유입수", f"{sc.get('유입수', 0):,}")
-                                st.metric("주문", f"{sc.get('상품주문건수', 0)}")
+                                st.metric("주문", f"{sc.get('상품주문건수', 0):,}")
                             st.metric("주문금액(백만원)", f"{sc.get('주문금액', 0):,.0f}")
                             if sc.get("마케팅활동"):
                                 st.caption(f"📌 {sc.get('마케팅활동')}")
@@ -1246,10 +1246,10 @@ def dashboard():
                             st.write("🔹 **공동구매**")
                             col1, col2 = st.columns(2)
                             with col1:
-                                st.metric("크리에이터", f"{cj.get('크리에이터운영수', 0)}")
-                                st.metric("모델", f"{cj.get('운영모델수', 0)}")
+                                st.metric("크리에이터", f"{cj.get('크리에이터운영수', 0):,}")
+                                st.metric("모델", f"{cj.get('운영모델수', 0):,}")
                             with col2:
-                                st.metric("주문", f"{cj.get('상품주문건수', 0)}")
+                                st.metric("주문", f"{cj.get('상품주문건수', 0):,}")
                             st.metric("주문금액(백만원)", f"{cj.get('주문금액', 0):,.0f}")
                             if cj.get("마케팅활동"):
                                 st.caption(f"📌 {cj.get('마케팅활동')}")
@@ -1366,10 +1366,10 @@ def dashboard():
                         ss_data = {
                             "항목": ["신규 관심고객", "신규구매 구매자", "재구매 구매자", "합계"],
                             "수량": [
-                                ss.get('신규관심고객수', 0),
-                                ss.get('신규구매구매자수', 0),
-                                ss.get('재구매구매자수', 0),
-                                ss.get('신규관심고객수', 0) + ss.get('신규구매구매자수', 0) + ss.get('재구매구매자수', 0)
+                                f"{ss.get('신규관심고객수', 0):,}",
+                                f"{ss.get('신규구매구매자수', 0):,}",
+                                f"{ss.get('재구매구매자수', 0):,}",
+                                f"{ss.get('신규관심고객수', 0) + ss.get('신규구매구매자수', 0) + ss.get('재구매구매자수', 0):,}"
                             ]
                         }
                         ss_df = pd.DataFrame(ss_data)
@@ -1402,9 +1402,9 @@ def dashboard():
                         # 테이블
                         af_data = {
                             "채널": ["쇼핑커넥트", "공동구매"],
-                            "크리에이터": [sc.get('크리에이터운영수', 0), cj.get('크리에이터운영수', 0)],
-                            "주문건수": [sc.get('상품주문건수', 0), cj.get('상품주문건수', 0)],
-                            "금액(백만)": [f"{sc.get('주문금액', 0):.1f}", f"{cj.get('주문금액', 0):.1f}"]
+                            "크리에이터": [f"{sc.get('크리에이터운영수', 0):,}", f"{cj.get('크리에이터운영수', 0):,}"],
+                            "주문건수": [f"{sc.get('상품주문건수', 0):,}", f"{cj.get('상품주문건수', 0):,}"],
+                            "금액(백만원)": [f"{sc.get('주문금액', 0):,.0f}", f"{cj.get('주문금액', 0):,.0f}"]
                         }
                         af_df = pd.DataFrame(af_data)
                         st.dataframe(af_df, use_container_width=True, hide_index=True)
@@ -1414,10 +1414,10 @@ def dashboard():
                         chart_data = {
                             "채널": ["쇼핑커넥트", "공동구매"],
                             "주문건수": [sc.get('상품주문건수', 0), cj.get('상품주문건수', 0)],
-                            "금액(백만)": [sc.get('주문금액', 0), cj.get('주문금액', 0)]
+                            "금액(백만원)": [sc.get('주문금액', 0), cj.get('주문금액', 0)]
                         }
                         chart_df = pd.DataFrame(chart_data)
-                        bar_chart = px.bar(chart_df, x="채널", y=["주문건수", "금액(백만)"], barmode="group", title="쇼핑커넥트 vs 공동구매")
+                        bar_chart = px.bar(chart_df, x="채널", y=["주문건수", "금액(백만원)"], barmode="group", title="쇼핑커넥트 vs 공동구매")
                         st.plotly_chart(bar_chart, use_container_width=True)
                     
                     if sc.get("마케팅활동") or cj.get("마케팅활동"):
