@@ -44,9 +44,9 @@ class Tests(unittest.TestCase):
         ui = UI("8월")
         render_month_week_analysis(ui, ROOT)
         self.assertEqual(ui.metrics[0][1], "4,187.38 백만원")
-        self.assertEqual(ui.metrics[1][1], "미제공")
+        self.assertEqual(ui.metrics[1][1], "109.41 백만원")
         self.assertEqual(ui.metrics[2][1], "-213 명")
-        self.assertFalse(ui.charts)
+        self.assertTrue(ui.charts)
 
     def test_empty_december(self):
         ui = UI("12월")
@@ -54,7 +54,7 @@ class Tests(unittest.TestCase):
         self.assertTrue(all(value == "미제공" for _, value in ui.metrics[:2]))
         # 스마트스토어 원본에는 12월 0이 실제 기재되어 있어 미제공으로 바꾸지 않는다.
         self.assertEqual(ui.metrics[2][1], "0 명")
-        self.assertFalse(ui.charts)
+        self.assertTrue(ui.charts)
 
     def test_all_months_render(self):
         for month in range(1, 13):

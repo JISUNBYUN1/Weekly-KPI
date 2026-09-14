@@ -13,6 +13,8 @@ st.set_page_config(page_title="PP3G | Marketing Performance", page_icon="▥", l
 from executive_report import (STYLE, build_premium_segment_table, load_star_xlsx,
                               render_month_week_analysis, render_product_performance,
                               render_star_section, star_month_sort_key, star_week_sort_key)
+from partner_views import (render_affiliate_dashboard, render_common_summary,
+                           render_partner_activity, render_partner_analysis)
 
 st.markdown(STYLE, unsafe_allow_html=True)
 
@@ -25,6 +27,20 @@ if "user_name" not in st.session_state:
     st.session_state.user_name = None
 if "page" not in st.session_state:
     st.session_state.page = "전체"
+
+
+def access_profile(user_name):
+    """이름 기반 역할 판정. 실제 운영 인원은 access_config.json에서 관리한다."""
+    try:
+        config = json.loads(Path(__file__).resolve().with_name("access_config.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        config = {"그룹담당자": [], "거래선담당자": {}}
+    if user_name in config.get("그룹담당자", []):
+        return True, AGENCIES
+    for agency, names in config.get("거래선담당자", {}).items():
+        if user_name in names:
+            return False, [agency]
+    return False, []
 
 # 데이터 로드
 @st.cache_data(ttl=3600)
@@ -608,6 +624,7 @@ def create_affiliate_table(data_dict, title=""):
 # 메인 대시보드
 def dashboard():
     user_name = st.session_state.user_name
+    is_group_manager, allowed_agencies = access_profile(user_name)
     
     # 사이드바 메뉴
     with st.sidebar:
@@ -617,15 +634,18 @@ def dashboard():
         
         pages = [
             ("월간ㆍ주간 분석", "전체"),
+            ("거래선별 분석", "거래선분석"),
             ("품목별 실적", "FCST"),
             ("프리미엄", "프리미엄"),
             ("스마트스토어", "스마트"),
             ("라이브커머스", "라이브"),
             ("어필리에이트", "어필"),
             ("주간 실적 입력", "거래선입력"),
-            ("거래선 기록", "거래선현황"),
+            ("거래선 활동 기록", "거래선기록"),
             ("담당자 피드백", "담당자피드백"),
         ]
+        if not is_group_manager:
+            pages = [item for item in pages if item[1] in {"전체", "거래선분석", "거래선기록", "어필"}]
         
         for emoji_name, page_key in pages:
             if st.button(emoji_name, use_container_width=True, key=f"btn_{page_key}", type="primary" if st.session_state.page == page_key else "secondary"):
@@ -633,7 +653,8 @@ def dashboard():
                 st.rerun()
         
         st.divider()
-        st.caption(f"사용자: {user_name}")
+        role_label = "그룹 담당" if is_group_manager else f"거래선 담당 ({', '.join(allowed_agencies)})" if allowed_agencies else "공통 요약 열람"
+        st.caption(f"사용자: {user_name} · {role_label}")
         
         if st.button("로그아웃", use_container_width=True):
             st.session_state.user_name = None
@@ -653,7 +674,16 @@ def dashboard():
     
     # 월간ㆍ주간 분석
     if current_page == "전체":
-        render_month_week_analysis(st, Path(__file__).resolve().parent)
+        if is_group_manager:
+            render_month_week_analysis(st, Path(__file__).resolve().parent)
+        else:
+            render_common_summary(st, Path(__file__).resolve().parent)
+
+    elif current_page == "거래선분석":
+        if allowed_agencies:
+            render_partner_analysis(st, Path(__file__).resolve().parent, allowed_agencies, is_group_manager, user_name)
+        else:
+            st.info("거래선별 분석은 권한이 등록된 사용자에게만 표시됩니다. access_config.json에 이름을 등록해주세요.")
 
     # 품목별 실적
     elif current_page == "FCST":
@@ -666,97 +696,18 @@ def dashboard():
     
     # 어필리에이트
     elif current_page == "어필":
-        st.subheader("🤝 어필리에이트 실적")
-        
-        # affiliate_data.json 로드
-        affiliate_data = {"월별": {}, "주차별": {}}
-        if os.path.exists("affiliate_data.json"):
-            try:
-                with open("affiliate_data.json", "r", encoding='utf-8') as f:
-                    affiliate_data = json.load(f)
-            except:
-                affiliate_data = {"월별": {}, "주차별": {}}
-        
-        if affiliate_data["월별"] or affiliate_data["주차별"]:
-            # 드롭다운: 월 선택 (역순)
-            all_months = ["1월", "2월", "3월", "4월", "5월", "6월", "7월", "8월", "9월", "10월", "11월", "12월"]
-            all_months_reversed = list(reversed(all_months))
-            selected_month = st.selectbox("월 선택", all_months_reversed, key="affiliate_month_select")
-            
-            # 주차 드롭다운: "계"를 항상 맨 위에
-            available_weeks = list(affiliate_data["주차별"].keys())
-            
-            # "계"를 맨 앞으로
-            if "계" in available_weeks:
-                available_weeks.remove("계")
-                available_weeks = ["계"] + sorted(available_weeks, reverse=True)
-            else:
-                available_weeks = sorted(available_weeks, reverse=True)
-            
-            if available_weeks:
-                selected_week = st.selectbox("주차 선택", available_weeks, key="affiliate_week_select")
-            else:
-                st.warning("주차 데이터가 없습니다")
-                selected_week = None
-            
-            st.write("---")
-            
-            if selected_week:
-                # 데이터 표시
-                if selected_week == "계":
-                    st.write(f"**📊 어필리에이트 실적 (전체 계)**")
-                    
-                    # 계 데이터 표시
-                    if selected_week in affiliate_data["주차별"]:
-                        week_data = affiliate_data["주차별"][selected_week]
-                        
-                        rows = []
-                        for agency, channels in week_data.items():
-                            for channel, data in channels.items():
-                                rows.append({
-                                    "거래선": agency,
-                                    "채널": channel,
-                                    "크리에이터": data.get('크리에이터운영수', 0),
-                                    "모델": data.get('운영모델', 0),
-                                    "유입수": f"{data.get('유입수', 0):,}",
-                                    "주문건수": f"{data.get('상품주문건수', 0):,}",
-                                    "전환율(%)": f"{data.get('전환율', 0):.4f}%",
-                                    "주문금액(백만)": f"{data.get('주문금액', 0) / 1000000:.2f}"
-                                })
-                        
-                        df = pd.DataFrame(rows)
-                        st.dataframe(df, use_container_width=True, hide_index=True)
-                    else:
-                        st.info("계 데이터가 없습니다")
-                else:
-                    st.write(f"**📊 {selected_week} 어필리에이트 실적**")
-                    
-                    # 주차별 데이터 표시
-                    if selected_week in affiliate_data["주차별"]:
-                        week_data = affiliate_data["주차별"][selected_week]
-                        
-                        rows = []
-                        for agency, channels in week_data.items():
-                            for channel, data in channels.items():
-                                rows.append({
-                                    "거래선": agency,
-                                    "채널": channel,
-                                    "크리에이터": data.get('크리에이터운영수', 0),
-                                    "모델": data.get('운영모델', 0),
-                                    "유입수": f"{data.get('유입수', 0):,}",
-                                    "주문건수": f"{data.get('상품주문건수', 0):,}",
-                                    "전환율(%)": f"{data.get('전환율', 0):.4f}%",
-                                    "주문금액(백만)": f"{data.get('주문금액', 0) / 1000000:.2f}"
-                                })
-                        
-                        df = pd.DataFrame(rows)
-                        st.dataframe(df, use_container_width=True, hide_index=True)
-                    else:
-                        st.info("해당 주차의 데이터가 없습니다")
+        if allowed_agencies:
+            render_affiliate_dashboard(st, Path(__file__).resolve().parent, allowed_agencies)
         else:
-            st.warning("어필리에이트 데이터가 없습니다")
+            st.info("거래선별 어필리에이트 실적은 권한 등록 후 확인할 수 있습니다.")
     
     # 거래선 입력
+    elif current_page == "거래선기록":
+        if allowed_agencies:
+            render_partner_activity(st, Path(__file__).resolve().parent, allowed_agencies)
+        else:
+            st.info("거래선 활동 기록은 권한 등록 후 확인할 수 있습니다.")
+
     elif current_page == "거래선입력":
         st.subheader("✏️ 거래선 주차별 입력")
         

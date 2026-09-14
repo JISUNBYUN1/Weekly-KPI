@@ -613,10 +613,30 @@ def _period_totals(live, affiliate, smart, month, calendar, monthly, selected_we
     scope_key = "월별" if monthly else "주차별"
     period = month if monthly else selected_week
     live_data = live.get(scope_key, {}).get(period, {})
-    affiliate_data = affiliate.get(scope_key, {}).get(period, {})
+    affiliate_data = affiliate_period_data(affiliate, calendar, month, "월간" if monthly else selected_week)
     smart_data = smart.get("신규관심고객", {}).get(scope_key, {}).get(period, {})
     period_rows = report_rows(live_data, affiliate_data, smart_data)
     return [strict_sum(row[field] for row in period_rows) for field in ("라이브 매출(백만)", "어필리에이트 주문금액(백만)", "신규 관심고객")]
+
+
+def affiliate_period_data(affiliate, calendar, month, selected_week):
+    """월별 원천이 없을 때도 그 달에 속한 주차 합계로 월 KPI를 제공한다."""
+    weekly = affiliate.get("주차별", {})
+    if selected_week != "월간":
+        return weekly.get(selected_week, weekly.get(str(selected_week).rstrip("AB"), {}))
+    direct = affiliate.get("월별", {}).get(month)
+    if direct:
+        return direct
+    merged = {}
+    for label in weeks_for_month(calendar, month):
+        source = weekly.get(label, weekly.get(label.rstrip("AB"), {}))
+        for agency, channels in source.items():
+            for channel, values in channels.items():
+                target = merged.setdefault(agency, {}).setdefault(channel, {})
+                for field, value in values.items():
+                    if field != "전환율" and number(value):
+                        target[field] = target.get(field, 0) + value
+    return merged
 
 
 def render_month_week_analysis(st, root):
@@ -641,7 +661,7 @@ def render_month_week_analysis(st, root):
         selected_week = st.selectbox("대상 주차", week_options, key=f"analysis_week_{month}")
     monthly = selected_week == "월간"
     live_data = live.get("월별" if monthly else "주차별", {}).get(month if monthly else selected_week, {})
-    affiliate_data = affiliate.get("월별" if monthly else "주차별", {}).get(month if monthly else selected_week, {})
+    affiliate_data = affiliate_period_data(affiliate, calendar, month, "월간" if monthly else selected_week)
     smart_data = smart.get("신규관심고객", {}).get("월별" if monthly else "주차별", {}).get(month if monthly else selected_week, {})
     rows = report_rows(live_data, affiliate_data, smart_data)
     scope = month if monthly else f"{month} {selected_week}"
@@ -731,6 +751,34 @@ def render_month_week_analysis(st, root):
         with st.expander(f"🔍 실행 제안 · 벤치마킹 ({len(proposals)}건)", expanded=False):
             for index, text in enumerate(proposals, 1):
                 st.markdown(f"**제안 {index} · 검토 및 실행**  \n{text}")
+
+    # 이 탭은 전체 요약 대시보드다. 모든 원천 테이블을 반복하지 않고,
+    # 특이 거래선만 비교 차트와 신호로 보여주며 상세는 거래선별 분석 탭에서 확인한다.
+    signal_df = pd.DataFrame(rows)
+    if not signal_df.empty:
+        st.subheader("거래선별 특이 신호")
+        chart_left, chart_right = st.columns(2)
+        with chart_left:
+            st.caption("라이브·어필리에이트 주문금액 비교")
+            st.bar_chart(signal_df.set_index("거래선")[["라이브 매출(백만)", "어필리에이트 주문금액(백만)"]], height=270)
+        with chart_right:
+            st.caption("스마트스토어 신규 관심고객 비교")
+            st.bar_chart(signal_df.set_index("거래선")[["신규 관심고객"]], height=270)
+        exception_rows = []
+        for field, label in [("라이브 매출(백만)", "라이브"), ("어필리에이트 주문금액(백만)", "어필리에이트"), ("신규 관심고객", "신규 관심고객")]:
+            valid = signal_df[["거래선", field]].dropna()
+            if not valid.empty and valid[field].sum() > 0:
+                top = valid.loc[valid[field].idxmax()]
+                low = valid.loc[valid[field].idxmin()]
+                exception_rows.append({"지표": label, "상위 거래선": top["거래선"], "상위 값": f"{top[field]:,.1f}",
+                                       "확인 거래선": low["거래선"], "확인 값": f"{low[field]:,.1f}"})
+        if exception_rows:
+            st.dataframe(pd.DataFrame(exception_rows), use_container_width=True, hide_index=True)
+    if errors:
+        with st.expander("데이터 읽기 안내"):
+            for error in errors:
+                st.warning(error)
+    return
 
     st.subheader("채널별 비교 분석")
     display = []
