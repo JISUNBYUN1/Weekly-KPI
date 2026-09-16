@@ -3,6 +3,7 @@ import json
 import re
 from datetime import datetime
 from pathlib import Path
+from report_data import display_number, activity_ledger, with_weekly_entries
 
 import pandas as pd
 
@@ -24,7 +25,7 @@ def _week_key(label):
 
 def _read_json(root, name, default):
     try:
-        return json.loads((Path(root) / name).read_text(encoding="utf-8"))
+        return with_weekly_entries(root, name, json.loads((Path(root) / name).read_text(encoding="utf-8")))
     except (OSError, ValueError):
         return default
 
@@ -35,39 +36,7 @@ def _write_json(path, value):
 
 
 def load_activity_history(root):
-    """업로드된 활동 원장을 거래선/주차 단위로 정규화한다."""
-    normalized = _read_json(root, "activity_history.json", None)
-    if isinstance(normalized, list):
-        rows = [row for row in normalized
-                if isinstance(row, dict) and row.get("거래선") in AGENCIES
-                and _week_key(row.get("주차"))[0] > 0 and str(row.get("주요활동", "")).strip()]
-    else:
-        source = Path(root) / "주차별 거래선활동.xlsx"
-        if not source.exists():
-            return []
-        frame = pd.read_excel(source, header=None)
-        week, period, rows = None, "", []
-        for _, row in frame.iterrows():
-            week_cell, agency_cell = row.iloc[1], row.iloc[2]
-            if isinstance(week_cell, str):
-                match = re.match(r"(\d+)주차\s*\(([^)]+)\)", week_cell)
-                if match:
-                    week, period = f"W{int(match.group(1)):02d}", match.group(2)
-            if week and isinstance(agency_cell, str) and agency_cell.strip() in AGENCIES:
-                body = "\n".join(str(value).strip() for value in (row.iloc[4], row.iloc[5])
-                                 if isinstance(value, str) and value.strip())
-                if body:
-                    rows.append({"거래선": agency_cell.strip(), "주차": week, "기간": period, "주요활동": body})
-    overrides = _read_json(root, "activity_overrides.json", {"edits": {}, "deleted": []})
-    deleted = set(overrides.get("deleted", []))
-    edits = overrides.get("edits", {})
-    result = []
-    for row in rows:
-        key = f"{row['거래선']}|{row['주차']}"
-        if key in deleted:
-            continue
-        result.append({**row, **edits.get(key, {})})
-    return result
+    return [row for row in activity_ledger(root) if row.get("거래선") in AGENCIES]
 
 
 def weeks_for_month(calendar, month):
@@ -129,7 +98,7 @@ def partner_metrics(root, agency, month, week, star_data=None):
     live_row = _live_period(live, month, week).get(agency, {})
     affiliate_row = affiliate_period(affiliate, calendar, month, week).get(agency, {})
     smart_row = _smart_period(smart, month, week).get(agency, {})
-    smart_field = "누적관심고객수" if week == "월간" else "신규관심고객수"
+    smart_field = "신규관심고객수"
     if star_data is None:
         star_data, _ = load_star_xlsx(root)
     star_scope_type = "월별" if week == "월간" else "주차별"
@@ -171,7 +140,7 @@ def _format_delta(current, previous, unit=""):
 def _format_value(value):
     if not _number(value):
         return "미제공"
-    return f"△{abs(value):,.0f}" if value < 0 else f"{value:,.0f}"
+    return f"△{abs(value):,.0f}" if value < 0 else display_number(value, 0)
 
 
 def _activity_highlights(records, limit=5):
@@ -194,7 +163,7 @@ def _linked_recommendations(current, previous, records, label, previous_records=
     source_records = previous_records + records
     activity_text = " ".join(row.get("주요활동", "") for row in source_records)
     activity_timing = activity_context or ("전기 활동" if previous_records else "당기 활동")
-    amount_unit, amount_scale = ("억원", 100) if monthly else ("백만원", 1)
+    amount_unit, amount_scale = ("억원", 100)
     specs = [
         ("라이브 매출(백만)", "라이브커머스", ("라이브", "방송"), "회당 매출", "성과 상위 시간대·상품 조합으로 1회 재편성"),
         ("어필리에이트 주문금액(백만)", "어필리에이트", ("어필리에이트", "크리에이터", "공동구매", "쇼핑커넥트"), "크리에이터당 주문·전환율", "주문 발생 크리에이터와 재고 보유 상품에 콘텐츠 집중"),
@@ -212,7 +181,7 @@ def _linked_recommendations(current, previous, records, label, previous_records=
         excerpt = activity_parts[0] if activity_parts else topic
         excerpt = excerpt if len(excerpt) <= 55 else excerpt[:54] + "…"
         if matched and _number(delta):
-            judgment = ("활동과 KPI가 동반 상승해 기여 가능성이 있습니다" if delta > 0 else
+            judgment = ("활동과 KPI가 동반 상승했습니다. 활동별 전환·주문 연결 확인 전에는 기여를 확정하지 않습니다" if delta > 0 else
                         "활동은 있었지만 KPI 상승으로 연결되지 않아 전환 구간 점검이 필요합니다" if delta < 0 else
                         "활동 이후 KPI가 보합으로, 실행 강도와 대상 적합성을 재검토해야 합니다")
             scale = 1 if field == "신규 관심고객" else amount_scale
@@ -249,7 +218,7 @@ def _linked_recommendations(current, previous, records, label, previous_records=
                             "판단": "선택 기간 실적 변동 기준 우선 점검 영역",
                             "차기 실행 제안": action, "확인 KPI": kpi})
         else:
-            results.append({"영역": "판매 전환", "근거": f"셀아웃 {_format_value(current.get('셀아웃 금액', 0) / (1e8 if monthly else 1e6))}{amount_unit}",
+            results.append({"영역": "판매 전환", "근거": f"셀아웃 {_format_value(current.get('셀아웃 금액', 0) / (1e8))}{amount_unit}",
                             "판단": "현재 실적 기준으로 판매 전환 효율 점검이 우선",
                             "차기 실행 제안": "셀인 상위·셀아웃 하위 모델을 분리해 재고·가격·노출 우선순위 재설정",
                             "확인 KPI": "모델별 셀인-셀아웃 차이·재고일수"})
@@ -280,11 +249,11 @@ def render_partner_activity(st, root, allowed_agencies):
         trend = []
         for label in trend_weeks:
             totals = star_partner_totals(star_data, "주차별", label, agency)
-            trend.append({"주차": label, "셀인(백만원)": totals["S/I_금액"] / 1e6,
-                          "셀아웃(백만원)": totals["S/O_금액"] / 1e6})
+            trend.append({"주차": label, "셀인(억원)": totals["S/I_금액"] / 1e8,
+                          "셀아웃(억원)": totals["S/O_금액"] / 1e8})
         if trend:
             st.line_chart(pd.DataFrame(trend).set_index("주차"), color=["#164c96", "#66a3ff"], height=240)
-            st.caption(f"STAR 대표거래선 기준 {agency} 주차별 셀인·셀아웃 실적(백만원)입니다.")
+            st.caption(f"STAR 대표거래선 기준 {agency} 주차별 셀인·셀아웃 실적(억원)입니다.")
 
     st.markdown(f"#### {week} · {row['기간']}")
     if row.get("수정일시"):
@@ -326,27 +295,29 @@ def render_partner_analysis(st, root, allowed_agencies, is_group_manager, user_n
     previous = partner_metrics(root, agency, prev_month, prev_week, star_data) if prev_month else {}
     label = "전월비" if week == "월간" else "전주비"
     monthly = week == "월간"
-    amount_unit, amount_scale = ("억원", 100) if monthly else ("백만원", 1)
+    if not monthly:
+        st.caption("STAR와 활동은 주차 날짜 경계가 다릅니다. 번호 기준 비교이며 활동 효과는 참고 가설입니다.")
+    amount_unit, amount_scale = ("억원", 100)
     columns = st.columns(5)
     for column, (name, title, unit, scale) in zip(columns, [
-            ("셀인 금액", "셀인 실적", amount_unit, 1e8 if monthly else 1e6),
-            ("셀아웃 금액", "셀아웃 실적", amount_unit, 1e8 if monthly else 1e6),
+            ("셀인 금액", "셀인 실적", amount_unit, 1e8),
+            ("셀아웃 금액", "셀아웃 실적", amount_unit, 1e8),
             ("라이브 매출(백만)", "라이브커머스 매출", amount_unit, amount_scale),
             ("어필리에이트 주문금액(백만)", "어필리에이트 주문금액", amount_unit, amount_scale),
-            ("신규 관심고객", "누적 관심고객" if monthly else "신규 관심고객", "명", 1)]):
+            ("신규 관심고객", "신규 관심고객", "명", 1)]):
         with column:
             value = current[name]
             displayed = value / scale if _number(value) else None
             prior_displayed = previous.get(name) / scale if _number(previous.get(name)) else None
             st.metric(f"{title}({unit})", _format_value(displayed),
                       delta=f"{_format_delta(displayed, prior_displayed, unit)} ({label})" if _number(displayed) else None)
-    peer_rows = [{"거래선": item, **partner_metrics(root, item, month, week, star_data)} for item in AGENCIES]
+    peer_rows = [{"거래선": item, **partner_metrics(root, item, month, week, star_data)} for item in (AGENCIES if is_group_manager else allowed_agencies)]
     peer = pd.DataFrame(peer_rows)
     st.markdown("#### 거래선별 성과 위치")
     left, right = st.columns([1.1, 1])
     with left:
         star_peer = peer[["거래선", "셀인 금액", "셀아웃 금액"]].copy()
-        star_peer[["셀인 금액", "셀아웃 금액"]] = star_peer[["셀인 금액", "셀아웃 금액"]] / (1e8 if monthly else 1e6)
+        star_peer[["셀인 금액", "셀아웃 금액"]] = star_peer[["셀인 금액", "셀아웃 금액"]] / (1e8)
         st.bar_chart(star_peer.set_index("거래선"), height=280)
     with right:
         for field, text, unit in [("셀아웃 금액", "셀아웃", amount_unit), ("라이브 매출(백만)", "라이브", amount_unit), ("어필리에이트 주문금액(백만)", "어필리에이트", amount_unit), ("신규 관심고객", "신규 관심고객", "명")]:
@@ -356,17 +327,17 @@ def render_partner_analysis(st, root, allowed_agencies, is_group_manager, user_n
                 continue
             rank = int(rank_value)
             if field in ("셀인 금액", "셀아웃 금액"):
-                display_value, display_unit = current[field] / (1e8 if monthly else 1e6), amount_unit
+                display_value, display_unit = current[field] / (1e8), amount_unit
             else:
                 display_value = current[field] / (amount_scale if "백만" in field else 1)
                 display_unit = amount_unit if "백만" in field else unit
-            st.write(f"- {text}: {rank}위 / {_format_value(display_value)}{display_unit}")
+            st.write(f"- {text}: " + (f"{rank}위 / " if is_group_manager else "") + f"{_format_value(display_value)}{display_unit}")
     if star_data:
         star_scope_type = "월별" if monthly else "주차별"
         star_scope = month if monthly else business_week_to_star_label(week)
         yoy = star_partner_yoy_totals(star_data, star_scope_type, star_scope, agency)
         yoy_rows = []
-        scale = 1e8 if monthly else 1e6
+        scale = 1e8
         for label_name, current_key, yoy_key in (("셀인", "셀인 금액", "S/I_금액"), ("셀아웃", "셀아웃 금액", "S/O_금액")):
             current_value, previous_year = current[current_key], yoy[yoy_key]
             change = (current_value - previous_year) / previous_year * 100 if previous_year else None
@@ -383,7 +354,7 @@ def render_partner_analysis(st, root, allowed_agencies, is_group_manager, user_n
                ((week == "월간" and row["주차"].rstrip("AB") in valid_weeks) or
                 row["주차"].rstrip("AB") == week.rstrip("AB"))]
     previous_records = [row for row in history if row["거래선"] == agency and prev_week and
-                        row["주차"].rstrip("AB") == prev_week.rstrip("AB")]
+                        ((prev_week == "월간" and row["주차"].rstrip("AB") in {w.rstrip("AB") for w in weeks_for_month(calendar, prev_month)}) or row["주차"].rstrip("AB") == prev_week.rstrip("AB"))]
     analysis_records = records
     activity_context = None
     if not analysis_records:
@@ -421,7 +392,7 @@ def render_partner_analysis(st, root, allowed_agencies, is_group_manager, user_n
         if product_changes:
             product_changes.sort(key=lambda item: item[1])
             declining, growing = product_changes[0], product_changes[-1]
-            scale = 1e8 if monthly else 1e6
+            scale = 1e8
             if declining[1] < 0:
                 recommendation_rows.insert(0, {
                     "영역": f"셀아웃·{declining[0]}",
@@ -442,13 +413,16 @@ def render_partner_analysis(st, root, allowed_agencies, is_group_manager, user_n
         if si_so_gap > 0:
             recommendation_rows.insert(0, {
                 "영역": "재고 회전",
-                "근거": f"셀인이 셀아웃보다 {si_so_gap / (1e8 if monthly else 1e6):,.0f}{amount_unit} 높음",
+                "근거": f"셀인이 셀아웃보다 {si_so_gap / (1e8):,.0f}{amount_unit} 높음",
                 "판단": "입고가 판매보다 앞서 재고 부담 가능성 확인 필요",
                 "차기 실행 제안": "셀인 상위·셀아웃 하위 모델을 추려 가격·광고·라이브 노출을 우선 배정",
                 "확인 KPI": "모델별 셀인-셀아웃 차이·재고일수",
             })
     recommendation_df = pd.DataFrame(recommendation_rows)
-    st.dataframe(recommendation_df, use_container_width=True, hide_index=True)
+    for _, proposal in recommendation_df.iterrows():
+        with st.expander(str(proposal.get("영역", "실행 제안")), expanded=True):
+            for key, value in proposal.items():
+                st.markdown(f"**{key}** · {value}")
     if analysis_records:
         with st.expander("선택 기간의 활동 기록" if records else f"참고 활동 기록 · {activity_context}", expanded=False):
             for row in analysis_records:
@@ -486,6 +460,8 @@ def render_common_summary(st, root):
     total_fields = ["셀인 금액", "셀아웃 금액", "라이브 매출(백만)", "어필리에이트 주문금액(백만)", "신규 관심고객"]
     totals = {field: sum(item.get(field, 0) for item in data) for field in total_fields}
     monthly = week == "월간"
+    if not monthly:
+        st.caption("STAR와 활동은 주차 날짜 경계가 다릅니다. 번호 기준 비교이며 활동 효과는 참고 가설입니다.")
     if star_data:
         star_scope_type = "월별" if monthly else "주차별"
         star_scope = month if monthly else business_week_to_star_label(week)
@@ -494,11 +470,11 @@ def render_common_summary(st, root):
         totals["셀아웃 금액"] = overall["S/O_금액"]
     columns = st.columns(5)
     for column, (field, label, unit, scale) in zip(columns, [
-            ("셀인 금액", "셀인 실적", "억원" if monthly else "백만원", 1e8 if monthly else 1e6),
-            ("셀아웃 금액", "셀아웃 실적", "억원" if monthly else "백만원", 1e8 if monthly else 1e6),
-            ("라이브 매출(백만)", "라이브커머스 매출", "억원" if monthly else "백만원", 100 if monthly else 1),
-            ("어필리에이트 주문금액(백만)", "어필리에이트 주문금액", "억원" if monthly else "백만원", 100 if monthly else 1),
-            ("신규 관심고객", "누적 관심고객" if monthly else "신규 관심고객", "명", 1)]):
+            ("셀인 금액", "셀인 실적", "억원", 1e8),
+            ("셀아웃 금액", "셀아웃 실적", "억원", 1e8),
+            ("라이브 매출(백만)", "라이브커머스 매출", "억원", 100),
+            ("어필리에이트 주문금액(백만)", "어필리에이트 주문금액", "억원", 100),
+            ("신규 관심고객", "신규 관심고객", "명", 1)]):
         with column:
             st.metric(f"{label}({unit})", _format_value(totals[field] / scale))
     st.caption("셀인·셀아웃은 품목 기준 전체 4개 채널 합계입니다. 개별 SOP 실적과 활동 기록은 거래선별 분석 메뉴에서 권한 범위 내에서만 표시됩니다.")
@@ -515,7 +491,7 @@ def render_affiliate_dashboard(st, root, allowed_agencies):
     week = st.selectbox("대상 주차", available, key="affiliate_week")
     data = affiliate_period(affiliate, calendar, month, "월간" if week == "계" else week)
     monthly = week == "계"
-    amount_unit, amount_scale = ("억원", 1e8) if monthly else ("백만원", 1e6)
+    amount_unit, amount_scale = ("억원", 1e8)
     sales_rows, operation_rows, chart_values = [], [], []
     for agency in allowed_agencies:
         channels = data.get(agency, {})
@@ -524,23 +500,23 @@ def render_affiliate_dashboard(st, root, allowed_agencies):
         total_creators = sum(v.get("크리에이터운영수", 0) for v in (shop, joint))
         sales_rows.append({
             ("거래선", "거래선"): agency,
-            ("전체", "주문(건)"): f"{total_orders:,.0f}",
-            ("전체", f"금액({amount_unit})"): f"{_affiliate_total(channels) / amount_scale:,.0f}",
-            ("쇼핑커넥트", "주문(건)"): f"{shop.get('상품주문건수', 0):,.0f}",
-            ("쇼핑커넥트", f"금액({amount_unit})"): f"{shop.get('주문금액', 0) / amount_scale:,.0f}",
-            ("공동구매", "주문(건)"): f"{joint.get('상품주문건수', 0):,.0f}",
-            ("공동구매", f"금액({amount_unit})"): f"{joint.get('주문금액', 0) / amount_scale:,.0f}",
+            ("전체", "주문(건)"): display_number(total_orders, 0),
+            ("전체", f"금액({amount_unit})"): display_number(_affiliate_total(channels) / amount_scale, 0),
+            ("쇼핑커넥트", "주문(건)"): display_number(shop.get('상품주문건수', 0), 0),
+            ("쇼핑커넥트", f"금액({amount_unit})"): display_number(shop.get('주문금액', 0) / amount_scale, 0),
+            ("공동구매", "주문(건)"): display_number(joint.get('상품주문건수', 0), 0),
+            ("공동구매", f"금액({amount_unit})"): display_number(joint.get('주문금액', 0) / amount_scale, 0),
         })
         inflow, shop_orders = shop.get("유입수", 0), shop.get("상품주문건수", 0)
         operation_rows.append({
             ("거래선", "거래선"): agency,
-            ("전체", "크리에이터"): f"{total_creators:,.0f}",
-            ("쇼핑커넥트", "크리에이터"): f"{shop.get('크리에이터운영수', 0):,.0f}",
-            ("쇼핑커넥트", "모델"): f"{shop.get('운영모델', shop.get('운영모델수', 0)):,.0f}",
-            ("쇼핑커넥트", "유입"): f"{inflow:,.0f}",
-            ("쇼핑커넥트", "전환율(%)"): f"{shop_orders / inflow * 100:.1f}" if inflow else "0.0",
-            ("공동구매", "크리에이터"): f"{joint.get('크리에이터운영수', 0):,.0f}",
-            ("공동구매", "모델"): f"{joint.get('운영모델', joint.get('운영모델수', 0)):,.0f}",
+            ("전체", "크리에이터"): display_number(total_creators, 0),
+            ("쇼핑커넥트", "크리에이터"): display_number(shop.get('크리에이터운영수', 0), 0),
+            ("쇼핑커넥트", "모델"): display_number(shop.get('운영모델', shop.get('운영모델수', 0)), 0),
+            ("쇼핑커넥트", "유입"): display_number(inflow, 0),
+            ("쇼핑커넥트", "전환율(%)"): display_number(shop_orders / inflow * 100, 1) if inflow else "0.0",
+            ("공동구매", "크리에이터"): display_number(joint.get('크리에이터운영수', 0), 0),
+            ("공동구매", "모델"): display_number(joint.get('운영모델', joint.get('운영모델수', 0)), 0),
         })
         chart_values.append({"거래선": agency, "쇼핑커넥트": shop.get("주문금액", 0) / amount_scale,
                              "공동구매": joint.get("주문금액", 0) / amount_scale})
@@ -552,9 +528,9 @@ def render_affiliate_dashboard(st, root, allowed_agencies):
     total_orders = sum(sum(data.get(agency, {}).get(ch, {}).get("상품주문건수", 0) for ch in ("쇼핑커넥트", "공동구매")) for agency in allowed_agencies)
     total_creators = sum(sum(data.get(agency, {}).get(ch, {}).get("크리에이터운영수", 0) for ch in ("쇼핑커넥트", "공동구매")) for agency in allowed_agencies)
     card1, card2, card3 = st.columns(3)
-    card1.metric(f"전체 주문금액({amount_unit})", f"{total_amount:,.0f}")
-    card2.metric("전체 주문(건)", f"{total_orders:,.0f}")
-    card3.metric("전체 크리에이터(명)", f"{total_creators:,.0f}")
+    card1.metric(f"전체 주문금액({amount_unit})", display_number(total_amount, 0))
+    card2.metric("전체 주문(건)", display_number(total_orders, 0))
+    card3.metric("전체 크리에이터(명)", display_number(total_creators, 0))
     st.markdown("#### 거래선별·채널별 매출 성과")
     st.dataframe(sales_frame, use_container_width=True, hide_index=True)
     left, right = st.columns([1, 1])

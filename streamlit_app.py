@@ -7,6 +7,7 @@ import math
 import re
 import tempfile
 from pathlib import Path
+from report_data import display_number, activity_ledger, with_weekly_entries
 
 st.set_page_config(page_title="PP3G | Marketing Performance", page_icon="▥", layout="wide")
 
@@ -253,7 +254,7 @@ def live_load_data(path=None):
     """매 화면 실행 시 읽어 수정 직후 데이터가 한 시간 캐시에 묶이지 않게 한다."""
     path = Path(path) if path is not None else Path(__file__).resolve().with_name("live_commerce_data.json")
     with path.open(encoding="utf-8-sig") as file:
-        return live_validate_data(json.load(file))
+        return live_validate_data(with_weekly_entries(path.parent, path.name, json.load(file)))
 
 
 def live_save_data(data, path=None):
@@ -303,22 +304,22 @@ def live_table_rows(agencies, monthly=False):
     for agency, record in [("전체", total)] + list(records.items()):
         count = record.get("방송횟수")
         sale = record.get("방송매출")
-        scale = 100000000 if monthly else 1000000
+        scale = 100000000
         rows.append({
             "거래선": agency,
-            "방송횟수": f"{count:,.0f}" if count is not None else "미제공",
-            f"방송매출({'억원' if monthly else '백만원'})": f"{sale / scale:,.0f}" if sale is not None else "미제공",
+            "방송횟수": display_number(count, 0) if count is not None else "미제공",
+            f"방송매출({'억원'})": display_number(sale / scale, 0) if sale is not None else "미제공",
         })
     return rows
 
 
 def live_render_table(agencies, monthly=False):
     st.dataframe(pd.DataFrame(live_table_rows(agencies, monthly)), use_container_width=True, hide_index=True)
-    chart = pd.DataFrame([{"거래선": agency, "방송매출": record.get("방송매출", 0) / (1e8 if monthly else 1e6)}
+    chart = pd.DataFrame([{"거래선": agency, "방송매출": record.get("방송매출", 0) / (1e8)}
                           for agency, record in agencies.items()])
     if hasattr(chart, "empty") and not chart.empty:
         st.bar_chart(chart.set_index("거래선"), color="#164c96", height=280)
-    st.caption(f"금액 단위: {'억원' if monthly else '백만원'} · 반올림 정수 표시 · 미제공과 0은 구분합니다.")
+    st.caption(f"금액 단위: {'억원'} · 반올림 정수 표시 · 미제공과 0은 구분합니다.")
 
 
 def live_render_page():
@@ -398,7 +399,7 @@ def format_display_value(val):
         elif val < 0:
             return f"△{int(abs(val)):,}" if val == int(val) else f"△{abs(val):,.1f}"
         else:
-            return f"{int(val):,}" if val == int(val) else f"{val:,.1f}"
+            return display_number(int(val), 0) if val == int(val) else display_number(val, 1)
     return str(val)
 
 
@@ -408,219 +409,6 @@ def format_change_percent(value):
         return "N/A"
     return f"+{value:,.1f}" if value > 0 else f"△{abs(value):,.1f}" if value < 0 else "0.0"
 
-# 라이브커머스 테이블 생성
-def create_live_commerce_table(data_dict, title=""):
-    """라이브커머스 계층형 테이블 생성 (소수점 1자리 ROUND)
-    
-    필요한 데이터 구조:
-    {
-        "전체": {
-            "방송횟수": int,
-            "방송매출": float (원 단위 또는 백만원),
-            "소요비용": float (원 단위 또는 백만원)
-        },
-        "거래선명": {
-            "방송횟수": int,
-            "방송매출": float,
-            "소요비용": float
-        }
-    }
-    """
-    st.markdown(f"### {title}")
-    
-    html = """
-    <style>
-        .live-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-        .live-table th, .live-table td { border: 1px solid #d0d0d0; padding: 8px 6px; text-align: center; height: 26px; }
-        .header-tier1 { background: #e2efda; font-weight: 600; font-size: 13px; }
-        .total-row { background: #fff2cc; font-weight: 600; border-top: 2px solid #333; }
-        .data-row { background: #f9f9f9; }
-        .data-row:nth-child(even) { background: #ffffff; }
-        .agency-col { text-align: left; font-weight: 500; padding-left: 8px; }
-        .number { text-align: right; padding-right: 4px; font-family: 'Courier New', monospace; }
-        .negative { color: #d92d20; }
-    </style>
-    <table class="live-table">
-        <thead>
-            <tr>
-                <th class="header-tier1">거래선</th>
-                <th class="header-tier1">방송횟수</th>
-                <th class="header-tier1">방송매출(백만)</th>
-                <th class="header-tier1">소요비용(백만)</th>
-                <th class="header-tier1">방송효율</th>
-                <th class="header-tier1">회당매출(백만)</th>
-            </tr>
-        </thead>
-        <tbody>
-    """
-    
-    def add_row(agency_name, is_total=False, broadcast_count=0, broadcast_sale=0, cost=0):
-        """행 생성 (6개 칼럼: 거래선, 방송횟수, 방송매출, 소요비용, 방송효율, 회당매출)
-        broadcast_count: 방송횟수 (정수)
-        broadcast_sale: 방송매출 (원 단위 또는 백만원, float) → 소수점 1자리
-        cost: 소요비용 (원 단위 또는 백만원, float) → 소수점 2자리
-        """
-        row_class = "total-row" if is_total else "data-row"
-        html_row = f'<tr class="{row_class}"><td class="agency-col">{agency_name}</td>'
-        
-        # 방송횟수 (정수)
-        html_row += f'<td class="number">{format_display_value(int(broadcast_count))}</td>'
-        
-        # 방송매출 (원 단위를 백만 단위로 변환, 소수점 1자리, 천단위 쉼표)
-        if isinstance(broadcast_sale, (int, float)):
-            # 원 단위인지 백만 단위인지 판단 (1000000 이상이면 원 단위)
-            if broadcast_sale >= 1000000:
-                sale_million = broadcast_sale / 1000000
-            else:
-                sale_million = broadcast_sale
-            html_row += f'<td class="number">{round(sale_million, 1):,.1f}</td>'
-        else:
-            html_row += f'<td class="number">-</td>'
-        
-        # 소요비용 (원 단위를 백만 단위로 변환, 소수점 2자리, 천단위 쉼표)
-        if isinstance(cost, (int, float)) and cost > 0:
-            if cost >= 1000000:
-                cost_million = cost / 1000000
-            else:
-                cost_million = cost
-            html_row += f'<td class="number">{round(cost_million, 2):,.2f}</td>'
-        else:
-            html_row += f'<td class="number">-</td>'
-        
-        # 방송효율 = 방송매출 / 소요비용 (소수점 2자리)
-        if isinstance(cost, (int, float)) and cost > 0 and isinstance(broadcast_sale, (int, float)):
-            efficiency = round(broadcast_sale / cost, 2)
-            html_row += f'<td class="number">{efficiency:.2f}</td>'
-        else:
-            html_row += f'<td class="number">-</td>'
-        
-        # 회당매출 = 방송매출 / 방송횟수 (백만원, 소수점 1자리, 천단위 쉼표)
-        if isinstance(broadcast_count, (int, float)) and broadcast_count > 0 and isinstance(broadcast_sale, (int, float)):
-            if broadcast_sale >= 1000000:
-                per_broadcast = broadcast_sale / broadcast_count / 1000000
-            else:
-                per_broadcast = broadcast_sale / broadcast_count
-            per_broadcast_rounded = round(per_broadcast, 1)
-            html_row += f'<td class="number">{per_broadcast_rounded:,.1f}</td>'
-        else:
-            html_row += f'<td class="number">-</td>'
-        
-        html_row += '</tr>'
-        return html_row
-    
-    # 계 (전체) 행
-    if "전체" in data_dict:
-        total = data_dict["전체"]
-        html += add_row(
-            "계",
-            is_total=True,
-            broadcast_count=total.get('방송횟수', 0),
-            broadcast_sale=total.get('방송매출', 0),
-            cost=total.get('소요비용', 0)
-        )
-    
-    # 거래선별 행
-    for agency in AGENCIES:
-        if agency in data_dict:
-            agency_data = data_dict[agency]
-            html += add_row(
-                agency,
-                is_total=False,
-                broadcast_count=agency_data.get('방송횟수', 0),
-                broadcast_sale=agency_data.get('방송매출', 0),
-                cost=agency_data.get('소요비용', 0)
-            )
-    
-    html += "</tbody></table>"
-    st.markdown(html, unsafe_allow_html=True)
-
-
-
-
-def create_affiliate_table(data_dict, title=""):
-    """어필리에이트 4단계 계층형 테이블 생성"""
-    st.markdown(f"### {title}")
-    
-    html = """
-    <style>
-        .affiliate-table { width: 100%; border-collapse: collapse; font-size: 14px; }
-        .affiliate-table th, .affiliate-table td { border: 1px solid #d0d0d0; padding: 8px 6px; text-align: center; height: 26px; }
-        .header-tier1 { background: #d9e1f2; font-weight: 600; font-size: 14px; }
-        .header-tier2 { background: #e7eef7; font-weight: 500; font-size: 13px; }
-        .total-row { background: #fff2cc; font-weight: 600; border-top: 2px solid #333; }
-        .data-row { background: #f9f9f9; }
-        .data-row:nth-child(even) { background: #ffffff; }
-        .agency-col { text-align: left; font-weight: 500; padding-left: 8px; }
-        .number { text-align: right; padding-right: 4px; font-family: 'Courier New', monospace; }
-    </style>
-    <table class="affiliate-table">
-        <thead>
-            <tr>
-                <th rowspan="2" class="header-tier1">거래선</th>
-                <th colspan="4" class="header-tier1">어필리에이트</th>
-                <th colspan="6" class="header-tier1">쇼핑커넥트</th>
-                <th colspan="4" class="header-tier1">공동구매</th>
-            </tr>
-            <tr>
-                <th class="header-tier2">크리에이터 운영수</th>
-                <th class="header-tier2">운영모델</th>
-                <th class="header-tier2">주문건수</th>
-                <th class="header-tier2">주문금액(백만)</th>
-                <th class="header-tier2">크리에이터 운영수</th>
-                <th class="header-tier2">운영모델</th>
-                <th class="header-tier2">유입수</th>
-                <th class="header-tier2">상품주문</th>
-                <th class="header-tier2">전환율(%)</th>
-                <th class="header-tier2">주문금액(백만)</th>
-                <th class="header-tier2">크리에이터 운영수</th>
-                <th class="header-tier2">운영모델</th>
-                <th class="header-tier2">상품주문</th>
-                <th class="header-tier2">주문금액(백만)</th>
-            </tr>
-        </thead>
-        <tbody>
-    """
-    
-    def add_row(agency_name, is_total=False, data_item=None):
-        row_class = "total-row" if is_total else "data-row"
-        html_row = f'<tr class="{row_class}"><td class="agency-col">{agency_name}</td>'
-        if data_item:
-            aff = data_item.get("어필리에이트", {})
-            html_row += f'<td class="number">{format_display_value(aff.get("크리에이터"))}</td>'
-            html_row += f'<td class="number">{format_display_value(aff.get("운영모델"))}</td>'
-            html_row += f'<td class="number">{format_display_value(aff.get("주문건수"))}</td>'
-            html_row += f'<td class="number">{format_display_value(aff.get("주문금액"))}</td>'
-            shop = data_item.get("쇼핑커넥트", {})
-            html_row += f'<td class="number">{format_display_value(shop.get("크리에이터"))}</td>'
-            html_row += f'<td class="number">{format_display_value(shop.get("운영모델"))}</td>'
-            html_row += f'<td class="number">{format_display_value(shop.get("유입수"))}</td>'
-            html_row += f'<td class="number">{format_display_value(shop.get("상품주문"))}</td>'
-            conversion = shop.get("전환율")
-            if conversion is None or conversion == 0:
-                conv_str = "-"
-            elif conversion < 0:
-                conv_str = f"△{abs(conversion):.1f}%"
-            else:
-                conv_str = f"+{conversion:.1f}%"
-            html_row += f'<td class="number">{conv_str}</td>'
-            html_row += f'<td class="number">{format_display_value(shop.get("주문금액"))}</td>'
-            joint = data_item.get("공동구매", {})
-            html_row += f'<td class="number">{format_display_value(joint.get("크리에이터"))}</td>'
-            html_row += f'<td class="number">{format_display_value(joint.get("운영모델"))}</td>'
-            html_row += f'<td class="number">{format_display_value(joint.get("상품주문"))}</td>'
-            html_row += f'<td class="number">{format_display_value(joint.get("주문금액"))}</td>'
-        html_row += '</tr>'
-        return html_row
-    
-    if "계" in data_dict:
-        html += add_row("계", is_total=True, data_item=data_dict["계"])
-    for agency in AGENCIES:
-        if agency in data_dict:
-            html += add_row(agency, is_total=False, data_item=data_dict[agency])
-    html += "</tbody></table>"
-    st.markdown(html, unsafe_allow_html=True)
-
-# 메인 대시보드
 def dashboard():
     user_name = st.session_state.user_name
     is_group_manager, allowed_agencies = access_profile(user_name)
@@ -877,19 +665,19 @@ def dashboard():
                             "운영모델수": sc_model,
                             "유입수": sc_visits,
                             "상품주문건수": sc_orders,
-                            "주문금액": round(sc_amount / 1000000, 2),
+                            "주문금액": sc_amount / 1000000,
                             "마케팅활동": sc_activity
                         },
                         "공동구매": {
                             "크리에이터운영수": cj_creator,
                             "운영모델수": cj_model,
                             "상품주문건수": cj_orders,
-                            "주문금액": round(cj_amount / 1000000, 2),
+                            "주문금액": cj_amount / 1000000,
                             "마케팅활동": cj_activity
                         },
                         "AI라이브": {
                             "방송횟수": live_count,
-                            "방송매출": round(live_sale / 1000000, 2)
+                            "방송매출": live_sale / 1000000
                         },
                         "당주주요활동": {
                             "AI라이브효율증대": activity_AI라이브효율증대,
@@ -940,7 +728,7 @@ def dashboard():
         if os.path.exists("smartstore_data.json"):
             try:
                 with open("smartstore_data.json", "r", encoding='utf-8') as f:
-                    smartstore_data = json.load(f)
+                    smartstore_data = with_weekly_entries(Path(__file__).resolve().parent, "smartstore_data.json", json.load(f))
             except:
                 smartstore_data = {}
         
@@ -968,14 +756,14 @@ def dashboard():
             if display_data:
                 rows = []
                 for agency, data in display_data.items():
-                    field = "누적관심고객수" if data_type == "월별" else "신규관심고객수"
+                    field = "신규관심고객수"
                     current_value = data.get(field, 0)
                     previous_value = previous_interest.get(agency, {}).get(field)
                     delta = current_value - previous_value if isinstance(previous_value, (int, float)) else None
                     row = {
                         "거래선": agency,
-                        "누적관심고객수": f"{data.get('누적관심고객수', 0):,}",
-                        "신규관심고객수": f"{data.get('신규관심고객수', 0):,}",
+                        "누적관심고객수": display_number(data.get('누적관심고객수', 0), 0),
+                        "신규관심고객수": display_number(data.get('신규관심고객수', 0), 0),
                         ("전월비(명)" if data_type == "월별" else "전주비(명)"):
                             (f"+{delta:,.0f}" if delta > 0 else f"△{abs(delta):,.0f}" if delta < 0 else "0") if delta is not None else "N/A",
                     }
@@ -993,10 +781,10 @@ def dashboard():
                 for agency, data in display_data2.items():
                     row = {
                         "거래선": agency,
-                        "신규구매고객": f"{data.get('신규구매고객수', 0):,}",
-                        "신규구매비중(%)": f"{data.get('신규구매비중', 0):.1f}",
-                        "재구매고객": f"{data.get('재구매고객수', 0):,}",
-                        "재구매비중(%)": f"{data.get('재구매비중', 0):.1f}",
+                        "신규구매고객": display_number(data.get('신규구매고객수', 0), 0),
+                        "신규구매비중(%)": display_number(data.get('신규구매비중', 0), 1),
+                        "재구매고객": display_number(data.get('재구매고객수', 0), 0),
+                        "재구매비중(%)": display_number(data.get('재구매비중', 0), 1),
                     }
                     if data_type == "월별":
                         row["신규전월비(%)"] = format_change_percent(data.get('신규구매전월비', 0))
@@ -1182,19 +970,19 @@ def dashboard():
                                     "운영모델수": sc_model,
                                     "유입수": sc_visits,
                                     "상품주문건수": sc_orders,
-                                    "주문금액": round(sc_amount / 1000000, 2),
+                                    "주문금액": sc_amount / 1000000,
                                     "마케팅활동": sc_activity
                                 }
                                 data["공동구매"] = {
                                     "크리에이터운영수": cj_creator,
                                     "운영모델수": cj_model,
                                     "상품주문건수": cj_orders,
-                                    "주문금액": round(cj_amount / 1000000, 2),
+                                    "주문금액": cj_amount / 1000000,
                                     "마케팅활동": cj_activity
                                 }
                                 data["AI라이브"] = {
                                     "방송횟수": live_count,
-                                    "방송매출": round(live_sale / 1000000, 2)
+                                    "방송매출": live_sale / 1000000
                                 }
                                 
                                 # weekly_data.json 업데이트
@@ -1212,11 +1000,11 @@ def dashboard():
                         ss = data.get("네이버스마트스토어", {})
                         col1, col2, col3 = st.columns(3)
                         with col1:
-                            st.metric("신규 관심고객", f"{ss.get('신규관심고객수', 0):,}")
+                            st.metric("신규 관심고객", display_number(ss.get('신규관심고객수', 0), 0))
                         with col2:
-                            st.metric("신규구매 구매자", f"{ss.get('신규구매구매자수', 0):,}")
+                            st.metric("신규구매 구매자", display_number(ss.get('신규구매구매자수', 0), 0))
                         with col3:
-                            st.metric("재구매 구매자", f"{ss.get('재구매구매자수', 0):,}")
+                            st.metric("재구매 구매자", display_number(ss.get('재구매구매자수', 0), 0))
                         
                         if ss.get("마케팅활동"):
                             st.info(f"📌 **마케팅활동**: {ss.get('마케팅활동')}")
@@ -1232,12 +1020,12 @@ def dashboard():
                             st.write("🔹 **쇼핑커넥트**")
                             col1, col2 = st.columns(2)
                             with col1:
-                                st.metric("크리에이터", f"{sc.get('크리에이터운영수', 0):,}")
-                                st.metric("모델", f"{sc.get('운영모델수', 0):,}")
+                                st.metric("크리에이터", display_number(sc.get('크리에이터운영수', 0), 0))
+                                st.metric("모델", display_number(sc.get('운영모델수', 0), 0))
                             with col2:
-                                st.metric("유입수", f"{sc.get('유입수', 0):,}")
-                                st.metric("주문", f"{sc.get('상품주문건수', 0):,}")
-                            st.metric("주문금액(백만원)", f"{sc.get('주문금액', 0):,.0f}")
+                                st.metric("유입수", display_number(sc.get('유입수', 0), 0))
+                                st.metric("주문", display_number(sc.get('상품주문건수', 0), 0))
+                            st.metric("주문금액(억원)", display_number(sc.get('주문금액', 0) / 100))
                             if sc.get("마케팅활동"):
                                 st.caption(f"📌 {sc.get('마케팅활동')}")
                         
@@ -1246,11 +1034,11 @@ def dashboard():
                             st.write("🔹 **공동구매**")
                             col1, col2 = st.columns(2)
                             with col1:
-                                st.metric("크리에이터", f"{cj.get('크리에이터운영수', 0):,}")
-                                st.metric("모델", f"{cj.get('운영모델수', 0):,}")
+                                st.metric("크리에이터", display_number(cj.get('크리에이터운영수', 0), 0))
+                                st.metric("모델", display_number(cj.get('운영모델수', 0), 0))
                             with col2:
-                                st.metric("주문", f"{cj.get('상품주문건수', 0):,}")
-                            st.metric("주문금액(백만원)", f"{cj.get('주문금액', 0):,.0f}")
+                                st.metric("주문", display_number(cj.get('상품주문건수', 0), 0))
+                            st.metric("주문금액(억원)", display_number(cj.get('주문금액', 0) / 100))
                             if cj.get("마케팅활동"):
                                 st.caption(f"📌 {cj.get('마케팅활동')}")
                         
@@ -1261,9 +1049,9 @@ def dashboard():
                         live = data.get("AI라이브", {})
                         col1, col2 = st.columns(2)
                         with col1:
-                            st.metric("방송횟수(회)", f"{live.get('방송횟수', 0):,}")
+                            st.metric("방송횟수(회)", display_number(live.get('방송횟수', 0), 0))
                         with col2:
-                            st.metric("방송매출(백만원)", f"{live.get('방송매출', 0):,.0f}")
+                            st.metric("방송매출(억원)", display_number(live.get('방송매출', 0) / 100))
                         
                         st.write("")
                         
@@ -1366,10 +1154,10 @@ def dashboard():
                         ss_data = {
                             "항목": ["신규 관심고객", "신규구매 구매자", "재구매 구매자", "합계"],
                             "수량": [
-                                f"{ss.get('신규관심고객수', 0):,}",
-                                f"{ss.get('신규구매구매자수', 0):,}",
-                                f"{ss.get('재구매구매자수', 0):,}",
-                                f"{ss.get('신규관심고객수', 0) + ss.get('신규구매구매자수', 0) + ss.get('재구매구매자수', 0):,}"
+                                display_number(ss.get('신규관심고객수', 0), 0),
+                                display_number(ss.get('신규구매구매자수', 0), 0),
+                                display_number(ss.get('재구매구매자수', 0), 0),
+                                display_number(ss.get('신규관심고객수', 0) + ss.get('신규구매구매자수', 0) + ss.get('재구매구매자수', 0), 0)
                             ]
                         }
                         ss_df = pd.DataFrame(ss_data)
@@ -1402,9 +1190,9 @@ def dashboard():
                         # 테이블
                         af_data = {
                             "채널": ["쇼핑커넥트", "공동구매"],
-                            "크리에이터": [f"{sc.get('크리에이터운영수', 0):,}", f"{cj.get('크리에이터운영수', 0):,}"],
-                            "주문건수": [f"{sc.get('상품주문건수', 0):,}", f"{cj.get('상품주문건수', 0):,}"],
-                            "금액(백만원)": [f"{sc.get('주문금액', 0):,.0f}", f"{cj.get('주문금액', 0):,.0f}"]
+                            "크리에이터": [display_number(sc.get('크리에이터운영수', 0), 0), display_number(cj.get('크리에이터운영수', 0), 0)],
+                            "주문건수": [display_number(sc.get('상품주문건수', 0), 0), display_number(cj.get('상품주문건수', 0), 0)],
+                            "금액(억원)": [display_number(sc.get('주문금액', 0) / 100), display_number(cj.get('주문금액', 0) / 100)]
                         }
                         af_df = pd.DataFrame(af_data)
                         st.dataframe(af_df, use_container_width=True, hide_index=True)
@@ -1414,10 +1202,10 @@ def dashboard():
                         chart_data = {
                             "채널": ["쇼핑커넥트", "공동구매"],
                             "주문건수": [sc.get('상품주문건수', 0), cj.get('상품주문건수', 0)],
-                            "금액(백만원)": [sc.get('주문금액', 0), cj.get('주문금액', 0)]
+                            "금액(억원)": [sc.get('주문금액', 0) / 100, cj.get('주문금액', 0) / 100]
                         }
                         chart_df = pd.DataFrame(chart_data)
-                        bar_chart = px.bar(chart_df, x="채널", y=["주문건수", "금액(백만원)"], barmode="group", title="쇼핑커넥트 vs 공동구매")
+                        bar_chart = px.bar(chart_df, x="채널", y=["주문건수", "금액(억원)"], barmode="group", title="쇼핑커넥트 vs 공동구매")
                         st.plotly_chart(bar_chart, use_container_width=True)
                     
                     if sc.get("마케팅활동") or cj.get("마케팅활동"):
@@ -1433,12 +1221,12 @@ def dashboard():
                     live_count = live.get('방송횟수', 0)
                     live_sales = live.get('방송매출', 0)
                     with col_live1:
-                        st.metric("방송횟수(회)", f"{live_count:,.0f}")
+                        st.metric("방송횟수(회)", display_number(live_count, 0))
                     with col_live2:
-                        st.metric("방송매출(백만원)", f"{live_sales:,.0f}")
+                        st.metric("방송매출(억원)", display_number(live_sales / 100))
                     with col_live3:
                         per_show = live_sales / live_count if live_count else 0
-                        st.metric("회당 매출(백만원)", f"{per_show:,.0f}")
+                        st.metric("회당 매출(억원)", display_number(per_show / 100))
                     
                     st.divider()
                     
@@ -1522,12 +1310,14 @@ def dashboard():
 
         st.divider()
         st.subheader("실적 파일 업로드")
-        st.caption("월간·주간 실적 원본을 등록합니다. 지원 형식: XLSX, XLS, CSV, JSON")
-        uploaded_result = st.file_uploader("실적 파일 선택", type=["xlsx", "xls", "csv", "json"], key="performance_source_upload")
+        st.caption("월간·주간 실적 원본을 등록합니다. STAR_2025 또는 STAR_2026 파일명 · XLSX, CSV")
+        uploaded_result = st.file_uploader("실적 파일 선택", type=["xlsx", "csv"], key="performance_source_upload")
         if uploaded_result is not None and st.button("파일 저장", use_container_width=True, key="save_performance_source"):
             try:
+                from report_data import apply_star_upload
+                count = apply_star_upload(Path(__file__).resolve().parent, uploaded_result)
                 _, upload_manifest = save_raw_upload(uploaded_result)
-                st.success(f"{uploaded_result.name} 파일을 저장했습니다.")
+                st.success(f"{uploaded_result.name} 파일의 {count:,}행을 실적에 반영했습니다.")
                 st.dataframe(pd.DataFrame(upload_manifest[-5:]), use_container_width=True, hide_index=True)
             except (OSError, ValueError) as error:
                 st.error(f"파일 저장 실패: {error}")
