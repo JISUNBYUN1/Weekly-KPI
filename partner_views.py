@@ -3,7 +3,8 @@ import json
 import re
 from datetime import datetime
 from pathlib import Path
-from report_data import display_number, activity_ledger, with_weekly_entries
+from report_data import display_number, activity_ledger, with_weekly_entries, read_file
+BUILD_ID = "20260916-r2"
 
 import pandas as pd
 
@@ -25,7 +26,7 @@ def _week_key(label):
 
 def _read_json(root, name, default):
     try:
-        return with_weekly_entries(root, name, json.loads((Path(root) / name).read_text(encoding="utf-8")))
+        return with_weekly_entries(root, name, read_file(root, name, default))
     except (OSError, ValueError):
         return default
 
@@ -532,7 +533,8 @@ def render_affiliate_dashboard(st, root, allowed_agencies):
     card2.metric("전체 주문(건)", display_number(total_orders, 0))
     card3.metric("전체 크리에이터(명)", display_number(total_creators, 0))
     st.markdown("#### 거래선별·채널별 매출 성과")
-    st.dataframe(sales_frame, use_container_width=True, hide_index=True)
+    from dashboard_views import render_grouped_table
+    render_grouped_table(st, sales_frame)
     left, right = st.columns([1, 1])
     with left:
         st.markdown("#### 채널 주문금액 비교")
@@ -540,5 +542,5 @@ def render_affiliate_dashboard(st, root, allowed_agencies):
         st.bar_chart(chart, height=300)
     with right:
         st.markdown("#### 운영·전환 상세")
-        st.dataframe(operation_frame, use_container_width=True, hide_index=True, height=300)
+        render_grouped_table(st, operation_frame)
     st.caption("월간 값은 월별 원천이 있으면 사용하고, 없으면 해당 월의 주차 데이터를 자동 합산합니다.")

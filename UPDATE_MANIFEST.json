@@ -1,0 +1,28 @@
+{
+  "build": "20260916-r2",
+  "files": {
+    "streamlit_app.py": "848c8f6f19da7dcb77046bf6009f93d0a69aaa680b7de292db0c3a3573a4e934",
+    "executive_report.py": "f495ab5f544771a5cf0e2cfbd998893909e37aa888e3d5bad6b64940641b0054",
+    "partner_views.py": "73999fa1a0d7efe1a1e8c3fa48bdc728ad653a0cb9960f8afafb9dcec7743036",
+    "report_data.py": "5d0387243d47af8e07574d5a8ab017a6e962aad875cae4c2514fd044b7bbe2d7",
+    "dashboard_views.py": "f125ae604c4251113d5be9a4a6898e17b56a759a59271c94b141650ef24d1422",
+    "requirements.txt": "3a121c3521c83005239742bd497685a1b6fb0c4872f2a02d845ad5c724087495",
+    "APPLY_R2.md": "038ccdd86a1d178c9bee5c32655672348dc027601e0f0035dc934d06553dcbf5",
+    "RECHECK_R2.md": "6957c1d60516307301c2616c9b46826626db11a416c2dccb34e4acfef3e9a70a",
+    "test_executive.py": "3abedc68e50a44287ae5dcaa69f3af6c892e28b40422501f1169dc9e0f2ef4e4",
+    "reference_data/STAR_2025.csv": "3d4bb0cb99c24cad7e3c23ac8a963ac34b8f1bbd97489b7f56a1d6cbed3ecb3e",
+    "reference_data/STAR_2026.csv": "4a26af94ef22c64e8113bef95ffad56be68842c77f4fc48243fc92ea81a419c2",
+    "reference_data/activity_history.json": "96a2e5e47d91daacc202feb09270f93fe3519cda2d852d5019524be6860809e3",
+    "reference_data/affiliate_data.json": "599257d4510a29783ac3df029c774d2b23f6caef03cda0139d7f6b246a412c4f",
+    "reference_data/live_commerce_data.json": "99dad1cb83c2fc57d7e72cbc09e04d95a24df99446c8e7819c21de0cafd92802",
+    "reference_data/purchase_provenance.json": "7a3a0652d630769a46231c12113d32ff7c9ba353dc1833f217628e0195790e6e",
+    "reference_data/smartstore_data.json": "6d35d37654239deda0c27651241237dd739a7b0c28b4e95e8d162b816738c3c8",
+    "reference_data/smartstore_purchase_history.json": "ec52b7a03df6e996d2e23b43d46a36025ebe35dadbf96eeb1e5b863ea6e4083e",
+    "reference_data/smartstore_week_months.json": "bb2360d4ef13846baff7c75e784d5c55ea52e9abbcd86abd0b7f4de700735f91",
+    "reference_data/weeks_2026.json": "c0860145c7c06ba7f648229dc4b6b064030297de1747d03835d6763049c180ba",
+    "tests/test_data_integration.py": "ba9ca87d13b137a2666abf1656465b8649e8b1f963d0a8be5240f8ec9d9ada3e",
+    "tests/test_live_commerce.py": "b3f35fde6ff4dbcd3f63b36791ef379250fdf4b362a09d38c12a94cd08b3a11e",
+    "tests/test_redteam_r2.py": "bc11c6ddbf3be2476dec47cd6f267e497fcf6f439aad5f404ceb45d11e0ead7e",
+    "tests/test_reporting_rules.py": "76dc74f5615803b7e97e8ed4641c598b9e39d0787241a275fa5ad1431de098eb"
+  }
+}

@@ -1,0 +1,210 @@
+{
+  "file": "(취합본) PP3G_주차별KPI현황_W36주.xlsx",
+  "sheet": "③ SOP_스토어_고객변화",
+  "weeks": {
+    "W23": {
+      "header": "23주",
+      "count_column": 25,
+      "new_rows": [
+        24,
+        30
+      ],
+      "repeat_rows": [
+        32,
+        38
+      ]
+    },
+    "W24": {
+      "header": "24주",
+      "count_column": 28,
+      "new_rows": [
+        24,
+        30
+      ],
+      "repeat_rows": [
+        32,
+        38
+      ]
+    },
+    "W25": {
+      "header": "25주",
+      "count_column": 31,
+      "new_rows": [
+        24,
+        30
+      ],
+      "repeat_rows": [
+        32,
+        38
+      ]
+    },
+    "W26": {
+      "header": "26주",
+      "count_column": 34,
+      "new_rows": [
+        24,
+        30
+      ],
+      "repeat_rows": [
+        32,
+        38
+      ]
+    },
+    "W27A": {
+      "header": "27A(6/29~30)",
+      "count_column": 37,
+      "new_rows": [
+        24,
+        30
+      ],
+      "repeat_rows": [
+        32,
+        38
+      ]
+    },
+    "W27B": {
+      "header": "27B(7/1~5)",
+      "count_column": 46,
+      "new_rows": [
+        24,
+        30
+      ],
+      "repeat_rows": [
+        32,
+        38
+      ]
+    },
+    "W28": {
+      "header": "28주",
+      "count_column": 49,
+      "new_rows": [
+        24,
+        30
+      ],
+      "repeat_rows": [
+        32,
+        38
+      ]
+    },
+    "W29": {
+      "header": "29주",
+      "count_column": 52,
+      "new_rows": [
+        24,
+        30
+      ],
+      "repeat_rows": [
+        32,
+        38
+      ]
+    },
+    "W30": {
+      "header": "30주",
+      "count_column": 55,
+      "new_rows": [
+        24,
+        30
+      ],
+      "repeat_rows": [
+        32,
+        38
+      ]
+    },
+    "W31A": {
+      "header": "31A(7/27~7/31)",
+      "count_column": 58,
+      "new_rows": [
+        24,
+        30
+      ],
+      "repeat_rows": [
+        32,
+        38
+      ]
+    },
+    "W31B": {
+      "header": "31B(8/1~2)",
+      "count_column": 67,
+      "new_rows": [
+        24,
+        30
+      ],
+      "repeat_rows": [
+        32,
+        38
+      ]
+    },
+    "W32": {
+      "header": "32주",
+      "count_column": 70,
+      "new_rows": [
+        24,
+        30
+      ],
+      "repeat_rows": [
+        32,
+        38
+      ]
+    },
+    "W33": {
+      "header": "33주",
+      "count_column": 73,
+      "new_rows": [
+        24,
+        30
+      ],
+      "repeat_rows": [
+        32,
+        38
+      ]
+    },
+    "W34": {
+      "header": "34주",
+      "count_column": 76,
+      "new_rows": [
+        24,
+        30
+      ],
+      "repeat_rows": [
+        32,
+        38
+      ]
+    },
+    "W35": {
+      "header": "35주",
+      "count_column": 79,
+      "new_rows": [
+        24,
+        30
+      ],
+      "repeat_rows": [
+        32,
+        38
+      ]
+    },
+    "W36A": {
+      "header": "36A(8/30~8/31)",
+      "count_column": 82,
+      "new_rows": [
+        24,
+        30
+      ],
+      "repeat_rows": [
+        32,
+        38
+      ]
+    },
+    "W36B": {
+      "header": "36B(9/1~6)",
+      "count_column": 88,
+      "new_rows": [
+        24,
+        30
+      ],
+      "repeat_rows": [
+        32,
+        38
+      ]
+    }
+  }
+}

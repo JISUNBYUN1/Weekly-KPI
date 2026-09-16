@@ -1,4 +1,5 @@
 """표준 라이브러리 테스트. 실제 Streamlit 브라우저 테스트를 대체하지 않는다."""
+from report_data import display_number, with_weekly_entries
 import ast
 import copy
 import json
@@ -22,7 +23,7 @@ def load_helpers():
                    (isinstance(node, ast.FunctionDef) and node.name.startswith("live_")) or
                    (isinstance(node, ast.Assign) and any(
                        isinstance(target, ast.Name) and target.id == "AGENCIES" for target in node.targets))]
-    namespace = dict(json=json, math=math, os=os, re=re, tempfile=tempfile,
+    namespace = dict(display_number=display_number, with_weekly_entries=with_weekly_entries, json=json, math=math, os=os, re=re, tempfile=tempfile,
                      Path=Path, __file__=str(ROOT / "streamlit_app.py"))
     exec(compile(ast.Module(body=definitions, type_ignores=[]), "streamlit_app.py", "exec"), namespace)
     return namespace
@@ -133,13 +134,13 @@ class LiveTests(unittest.TestCase):
                        "마케팅활동": "방송 소재 테스트"}}
         before = copy.deepcopy(data)
         row = H["live_table_rows"](data)[1]
-        self.assertEqual(row, {"거래선": "평강", "방송횟수": "1,234", "방송매출(백만원)": "6"})
+        self.assertEqual(row, {"거래선": "평강", "방송횟수": "1,234", "방송매출(억원)": "0"})
         self.assertEqual(data, before)
 
     def test_zero_distinct_from_missing(self):
         rows = H["live_table_rows"]({"평강": {"방송횟수": 0, "방송매출": 0, "소요비용": None}})
         self.assertEqual(rows[1]["방송횟수"], "0")
-        self.assertEqual(rows[1]["방송매출(백만원)"], "0")
+        self.assertEqual(rows[1]["방송매출(억원)"], "0")
         self.assertEqual(rows[2]["방송횟수"], "미제공")
         self.assertEqual(rows[0]["방송횟수"], "미제공")
 
@@ -267,7 +268,7 @@ class LiveTests(unittest.TestCase):
         self.assertEqual(st.options["월 선택"], [f"{m}월" for m in range(12, 0, -1)])
         self.assertEqual(st.options["주차 선택"], ["계", "W35A", "W34", "W33", "W32", "W31B"])
         self.assertEqual(st.tables[0][0]["방송횟수"], "227")
-        self.assertEqual(st.tables[0][0]["방송매출(백만원)"], "1,197")
+        self.assertEqual(st.tables[0][0]["방송매출(억원)"], "12")
 
     def test_page_month_change_scopes_widget_key(self):
         for month in ("8월", "9월", "12월"):

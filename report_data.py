@@ -3,6 +3,10 @@ import json
 import math
 from pathlib import Path
 
+BUILD_ID = "20260916-r2"
+REFERENCE_FILES = {"activity_history.json", "smartstore_data.json", "affiliate_data.json",
+                   "live_commerce_data.json", "weeks_2026.json"}
+
 
 def display_number(value, decimals=0, signed=False):
     if not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(value):
@@ -12,10 +16,17 @@ def display_number(value, decimals=0, signed=False):
 
 
 def read_file(root, name, default):
-    try:
-        return json.loads((Path(root) / name).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return default
+    paths = [Path(root) / name]
+    if name in REFERENCE_FILES:
+        paths.append(Path(root) / "reference_data" / name)
+    for path in paths:
+        try:
+            value = json.loads(path.read_text(encoding="utf-8-sig"))
+            if isinstance(value, type(default)):
+                return value
+        except (OSError, ValueError):
+            continue
+    return default
 
 
 def activity_ledger(root):
@@ -23,6 +34,7 @@ def activity_ledger(root):
     for row in read_file(root, "activity_history.json", []):
         if isinstance(row, dict) and row.get("거래선") and row.get("주차"):
             records[(row["거래선"], row["주차"])] = dict(row)
+            records[(row["거래선"], row["주차"])].setdefault("기간", "")
     for row in read_file(root, "weekly_data.json", []):
         if not isinstance(row, dict):
             continue
@@ -49,6 +61,33 @@ def activity_ledger(root):
         if key not in deleted:
             result.append({**row, **edits.get(key, {})})
     return result
+
+
+def smartstore_dataset(root):
+    """Keep purchase counts missing when the source has none; never copy monthly counts into weeks."""
+    data = with_weekly_entries(root, "smartstore_data.json", read_file(root, "smartstore_data.json", {}))
+    purchases = data.setdefault("구매비중", {}).setdefault("주차별", {})
+    history = read_file(Path(root) / "reference_data", "smartstore_purchase_history.json", {})
+    for week, agencies in history.items():
+        for agency, values in agencies.items():
+            purchases.setdefault(week, {}).setdefault(agency, values)
+    for row in read_file(root, "weekly_data.json", []):
+        if not isinstance(row, dict):
+            continue
+        week = row.get("주차_표시") or row.get("주차")
+        agency = row.get("거래선")
+        source = row.get("네이버스마트스토어", {})
+        new = source.get("신규구매구매자수")
+        repeat = source.get("재구매구매자수")
+        if not week or not agency or any(not isinstance(v, (int, float)) or not math.isfinite(v) or v < 0 for v in (new, repeat)):
+            continue
+        total = new + repeat
+        purchases.setdefault(week, {})[agency] = {
+            "신규구매고객수": new, "재구매고객수": repeat,
+            "신규구매비중": new / total * 100 if total else None,
+            "재구매비중": repeat / total * 100 if total else None,
+        }
+    return data
 
 
 def with_weekly_entries(root, filename, data):

@@ -4,7 +4,8 @@ import zipfile
 import math
 import re
 from pathlib import Path
-from report_data import display_number, activity_ledger, with_weekly_entries
+from report_data import display_number, activity_ledger, with_weekly_entries, read_file
+BUILD_ID = "20260916-r2"
 
 import pandas as pd
 
@@ -57,14 +58,34 @@ def _star_status(week_num, force_status=None):
 
 
 def _read_star_dataframe(csv_path, xlsx_path):
-    if csv_path.exists() and (not xlsx_path.exists() or not zipfile.is_zipfile(xlsx_path) or csv_path.stat().st_mtime_ns >= xlsx_path.stat().st_mtime_ns):
-        return pd.read_csv(csv_path, encoding="utf-8-sig")
-    if xlsx_path.exists():
-        # 2025 STAR는 상단에 안내 행이 있고 8번째 행이 헤더다. 향후 양식이
-        # 바뀌어도 '기준품목' 헤더를 기준으로 찾아 전년 비교가 끊기지 않게 한다.
-        preview = pd.read_excel(xlsx_path, sheet_name=0, header=None, nrows=20, engine='openpyxl')
-        header_row = next((idx for idx in preview.index if "기준품목" in preview.iloc[idx].astype(str).tolist()), 0)
-        return pd.read_excel(xlsx_path, sheet_name=0, header=header_row, engine='openpyxl')
+    required = {"영업그룹", "대표거래선", "기준품목", "월(AB)", "주(AB)", "메져_구분",
+                "◆_매출", "◆_실판매_모바일/유통직판 포함"}
+    candidates = sorted([p for p in (csv_path, xlsx_path) if p.exists()],
+                        key=lambda p: p.stat().st_mtime_ns, reverse=True)
+    reference = csv_path.parent / "reference_data" / csv_path.name
+    if reference.exists():
+        candidates.append(reference)
+    failures = []
+    for path in candidates:
+        try:
+            if path.suffix == ".csv":
+                frame = pd.read_csv(path, encoding="utf-8-sig")
+            else:
+                if not zipfile.is_zipfile(path):
+                    raise ValueError("일반 XLSX 형식으로 읽을 수 없음")
+                preview = pd.read_excel(path, header=None, nrows=20, engine="openpyxl")
+                header = next((i for i in preview.index if "기준품목" in preview.iloc[i].astype(str).tolist()), None)
+                if header is None:
+                    raise ValueError("기준품목 헤더 없음")
+                frame = pd.read_excel(path, header=header, engine="openpyxl")
+            if frame.empty or not required.issubset(frame.columns):
+                raise ValueError("필수 실적 열 또는 데이터 없음")
+            frame.attrs["source"] = str(path.relative_to(csv_path.parent))
+            return frame
+        except (OSError, ValueError, ImportError, zipfile.BadZipFile) as error:
+            failures.append(f"{path.name}: {error}")
+    if failures:
+        raise ValueError(" / ".join(failures))
     return None
 
 
@@ -162,7 +183,7 @@ def load_star_xlsx(root):
     같은 번호 기준의 근사치입니다."""
     try:
         root = Path(root).resolve()
-        source_paths = [root / name for name in ("STAR_2026.csv", "STAR_2026.xlsx", "STAR_2025.csv", "STAR_2025.xlsx")]
+        source_paths = [base / name for base in (root, root / "reference_data") for name in ("STAR_2026.csv", "STAR_2026.xlsx", "STAR_2025.csv", "STAR_2025.xlsx")]
         signature = tuple((str(path), path.stat().st_mtime_ns, path.stat().st_size)
                           for path in source_paths if path.exists())
         cache_key = (str(root), signature)
@@ -178,7 +199,10 @@ def load_star_xlsx(root):
 
         result = _parse_star_dataframe(df)
 
-        prev_df = _read_star_dataframe(root / "STAR_2025.csv", root / "STAR_2025.xlsx")
+        try:
+            prev_df = _read_star_dataframe(root / "STAR_2025.csv", root / "STAR_2025.xlsx")
+        except (OSError, ValueError):
+            prev_df = None
         if prev_df is not None and all(col in prev_df.columns for col in required_cols):
             prev_result = _parse_star_dataframe(prev_df, force_status="실적")
             for unit in ("수량", "금액"):
@@ -201,6 +225,7 @@ def load_star_xlsx(root):
                 result[unit]["prev_year_partner_월별"] = {}
                 result[unit]["prev_year_partner_주차별"] = {}
 
+        result["_sources"] = {"2026": df.attrs.get("source"), "2025": prev_df.attrs.get("source") if prev_df is not None else None}
         loaded = (result, [])
         _STAR_LOAD_CACHE.clear()
         _STAR_LOAD_CACHE[cache_key] = loaded
@@ -274,11 +299,11 @@ def build_premium_segment_table(star_data, scope_type, scope_value):
             rows.append({
                 ("품목", "품목"): product,
                 ("구분", "구분"): basis,
-                ("S/I", "전체"): f"{all_values['S/I'] / divisor:,.{decimals}f}",
-                ("S/I", "프리미엄"): f"{premium_values['S/I'] / divisor:,.{decimals}f}",
+                ("S/I", "전체"): display_number(all_values['S/I'] / divisor),
+                ("S/I", "프리미엄"): display_number(premium_values['S/I'] / divisor),
                 ("S/I", "비중(%)"): display_number(si_ratio, 1) if number(si_ratio) else "N/A",
-                ("S/O", "전체"): f"{all_values['S/O'] / divisor:,.{decimals}f}",
-                ("S/O", "프리미엄"): f"{premium_values['S/O'] / divisor:,.{decimals}f}",
+                ("S/O", "전체"): display_number(all_values['S/O'] / divisor),
+                ("S/O", "프리미엄"): display_number(premium_values['S/O'] / divisor),
                 ("S/O", "비중(%)"): display_number(so_ratio, 1) if number(so_ratio) else "N/A",
             })
     frame = pd.DataFrame(rows)
@@ -410,14 +435,14 @@ def build_star_channel_table(star_data, scope_type, scope_value, product):
 def render_star_section(st, star_data, scope_type, scope_value, prev_scope_value):
     """S/I·S/O 그룹 헤더 표 + 품목별 그래프 + 채널별(품목 선택) 표/그래프를 한 화면에 표시.
     반환값: 사용자가 채널 구성에서 선택한 품목명(다른 섹션과 동기화용), 없으면 None."""
-    st.caption(f"⚠️ STAR 원본은 {STAR_ACTUAL_CUTOFF_WEEK}주(9/12)까지는 실적으로 확정되고 이후는 FCST(예측)입니다. "
-               "금액은 억원 단위이며, 전년비는 2025년 STAR 데이터 기준 동월/동주차 비교입니다(전년 데이터 없는 항목은 N/A).")
+    st.caption("셀인=매출, 셀아웃=실판매 · 금액 억원 · 전년비는 동일 월 또는 STAR 주차 번호 기준입니다.")
     table = build_star_combined_table(star_data, scope_type, scope_value, prev_scope_value)
     if table is None:
         st.info(f"{scope_value}에 품목별 STAR 실적 데이터가 없습니다.")
         return None
 
-    st.dataframe(table, use_container_width=True, hide_index=True)
+    from dashboard_views import render_grouped_table
+    render_grouped_table(st, table)
 
     # 품목별 S/I vs S/O 그래프 (수량 기준)
     if scope_type == "월별":
@@ -471,7 +496,7 @@ def render_star_section(st, star_data, scope_type, scope_value, prev_scope_value
 def read_json(root, filename, errors, default=None):
     path = Path(root) / filename
     if not path.exists():
-        return {} if default is None else default
+        return with_weekly_entries(root, filename, read_file(root, filename, {} if default is None else default))
     try:
         with path.open(encoding="utf-8-sig") as handle:
             return with_weekly_entries(root, filename, json.load(handle))
@@ -1312,36 +1337,12 @@ def render_product_performance(st, root):
     sync_product = None  # 채널별 실적(bizplan)과 동기화할 품목
 
     # STAR 데이터 있으면 먼저 표시 (S/I·S/O 그룹표 + 그래프 + 채널구성, 실적/FCST 자동 구분)
+    from dashboard_views import period_controls, source_caption
+    scope_type, selected_scope, prev_scope = period_controls(st, star_data, "product")
+    source_caption(st, star_data)
     if star_data:
-        st.markdown("### STAR 기반 실적 (셀인·셀아웃, 마감분은 실적/잔여기간은 FCST)")
-        scope_type = st.radio("데이터 종류", ["월별", "주차별"], key="product_star_scope", horizontal=True)
-        if scope_type == "월별":
-            keys = sorted(
-                set(star_data.get("수량", {}).get("월별", {}).keys()) | set(star_data.get("금액", {}).get("월별", {}).keys()),
-                key=star_month_sort_key, reverse=True)
-        else:
-            keys = sorted(
-                set(star_data.get("수량", {}).get("주차별", {}).keys()) | set(star_data.get("금액", {}).get("주차별", {}).keys()),
-                key=star_week_sort_key, reverse=True)
-            st.caption("STAR 원본 자체 주차 번호이며, PP3G 업무주차표(W번호)와 월경계 주차에서 다를 수 있습니다.")
-
-        if keys:
-            selected_scope = st.selectbox("대상 월" if scope_type == "월별" else "대상 주차", keys, key="product_star_scope_value")
-            if scope_type == "월별":
-                month_num = star_month_sort_key(selected_scope)
-                prev_scope = f"{month_num - 1}월" if month_num > 1 else None
-                sync_month = selected_scope
-            else:
-                weeks_sorted_asc = sorted(
-                    set(star_data.get("수량", {}).get("주차별", {}).keys()) | set(star_data.get("금액", {}).get("주차별", {}).keys()),
-                    key=star_week_sort_key)
-                idx = weeks_sorted_asc.index(selected_scope) if selected_scope in weeks_sorted_asc else -1
-                prev_scope = weeks_sorted_asc[idx - 1] if idx > 0 else None
-                sync_month = star_data.get("수량", {}).get("주차별", {}).get(selected_scope, {}).get("month")
-            sync_product = render_star_section(st, star_data, scope_type, selected_scope, prev_scope)
-        else:
-            st.info("STAR 품목별 실적 데이터가 없습니다.")
-
+        st.markdown("### 품목별 셀인·셀아웃 실적")
+        render_star_section(st, star_data, scope_type, selected_scope, prev_scope)
         if star_errors:
             with st.expander("STAR 데이터 읽기 안내"):
                 for error in star_errors:
@@ -1362,9 +1363,9 @@ def render_product_performance(st, root):
         return
 
     all_months = [f"{m}월" for m in range(12, 0, -1)]
-    month = sync_month if sync_month in all_months else all_months[0]
-    product = sync_product if sync_product in data else "전체"
-    st.caption(f"위 STAR 섹션에서 선택한 기간·품목과 동일하게 표시합니다 → **{month} / {product}**")
+    month = selected_scope if scope_type == "월별" else "8월"
+    product = st.selectbox("품목", ["전체"] + sorted(data), key="product_fallback_item")
+    st.caption(f"STAR를 읽지 못해 월별 채널 자료로 표시합니다 → **{month} / {product}**")
     items = sorted(data) if product == "전체" else [product]
     channel_rows = [{"거래선": channel, "실적(수량)": sum(data[item].get(month, {}).get(channel, 0) for item in items)}
                     for channel in sorted({channel for item in items for values in data[item].values() for channel in values})]

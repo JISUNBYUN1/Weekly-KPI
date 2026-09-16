@@ -50,7 +50,7 @@ class Tests(unittest.TestCase):
         render_month_week_analysis(ui, ROOT)
         self.assertEqual(ui.metrics[0][1], "42")
         self.assertEqual(ui.metrics[1][1], "1")
-        self.assertEqual(ui.metrics[2][1], "1,003,588")
+        self.assertEqual(ui.metrics[2][1], "△213")
         self.assertEqual(ui.metrics[3][1], "640")
         self.assertEqual(ui.metrics[4][1], "410")
         self.assertTrue(ui.charts)
@@ -75,7 +75,7 @@ class Tests(unittest.TestCase):
     def test_weekly_report(self):
         ui = UI("8월", "W32")
         render_month_week_analysis(ui, ROOT)
-        self.assertEqual(ui.metrics[0][1], "1,197")
+        self.assertEqual(ui.metrics[0][1], "12")
 
     def test_product_report(self):
         ui = UI("8월")

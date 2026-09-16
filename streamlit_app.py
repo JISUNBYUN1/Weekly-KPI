@@ -17,7 +17,15 @@ from executive_report import (STYLE, build_premium_segment_table, load_star_xlsx
 from partner_views import (render_affiliate_dashboard, render_common_summary,
                            render_partner_activity, render_partner_analysis)
 
+from dashboard_views import render_smartstore, render_premium
+import executive_report, partner_views, report_data, dashboard_views
+BUILD_ID = "20260916-r2"
+if any(getattr(module, "BUILD_ID", None) != BUILD_ID for module in
+       (executive_report, partner_views, report_data, dashboard_views)):
+    st.error("업데이트 파일 버전이 서로 다릅니다. 수정 패키지의 코드 5개를 함께 반영한 뒤 Manage app에서 Reboot app을 실행해주세요.")
+    st.stop()
 st.markdown(STYLE, unsafe_allow_html=True)
+st.sidebar.caption("버전 " + BUILD_ID)
 
 # 거래선 목록
 AGENCIES = ["평강", "문성", "케이디엘", "하나로", "회산", "현성", "클릭나라"]
@@ -719,129 +727,11 @@ def dashboard():
                     st.success(f"✅ {input_agency} - {input_month} {input_week} 데이터가 저장되었습니다!")
                     st.balloons()
     
-    # 스마트스토어
     elif current_page == "스마트":
-        st.subheader("🛒 스마트스토어 실적")
-        
-        # smartstore_data.json 로드
-        smartstore_data = {}
-        if os.path.exists("smartstore_data.json"):
-            try:
-                with open("smartstore_data.json", "r", encoding='utf-8') as f:
-                    smartstore_data = with_weekly_entries(Path(__file__).resolve().parent, "smartstore_data.json", json.load(f))
-            except:
-                smartstore_data = {}
-        
-        if smartstore_data:
-            # 두 분석 영역이 동일한 기간 선택을 공유한다.
-            col1, col2 = st.columns(2)
-            with col1:
-                data_type = st.radio("데이터 종류", ["월별", "주차별"], key="ss_scope_type", horizontal=True)
-            with col2:
-                bucket_key = "월별" if data_type == "월별" else "주차별"
-                interest_bucket = smartstore_data.get("신규관심고객", {}).get(bucket_key, {})
-                purchase_bucket = smartstore_data.get("구매비중", {}).get(bucket_key, {})
-                options = sorted(set(interest_bucket) | set(purchase_bucket),
-                                 key=(lambda x: int(str(x).replace("월", ""))) if data_type == "월별" else live_week_sort_key,
-                                 reverse=True)
-                selected = st.selectbox("대상 월" if data_type == "월별" else "대상 주차", options, key="ss_scope_value")
-            display_data = interest_bucket.get(selected, {})
-            display_data2 = purchase_bucket.get(selected, {})
-            ordered = sorted(options, key=(lambda x: int(str(x).replace("월", ""))) if data_type == "월별" else live_week_sort_key)
-            selected_index = ordered.index(selected) if selected in ordered else -1
-            previous_key = ordered[selected_index - 1] if selected_index > 0 else None
-            previous_interest = interest_bucket.get(previous_key, {}) if previous_key else {}
-
-            st.subheader("신규 관심고객 유입 현황")
-            if display_data:
-                rows = []
-                for agency, data in display_data.items():
-                    field = "신규관심고객수"
-                    current_value = data.get(field, 0)
-                    previous_value = previous_interest.get(agency, {}).get(field)
-                    delta = current_value - previous_value if isinstance(previous_value, (int, float)) else None
-                    row = {
-                        "거래선": agency,
-                        "누적관심고객수": display_number(data.get('누적관심고객수', 0), 0),
-                        "신규관심고객수": display_number(data.get('신규관심고객수', 0), 0),
-                        ("전월비(명)" if data_type == "월별" else "전주비(명)"):
-                            (f"+{delta:,.0f}" if delta > 0 else f"△{abs(delta):,.0f}" if delta < 0 else "0") if delta is not None else "N/A",
-                    }
-                    rows.append(row)
-                df = pd.DataFrame(rows)
-                st.dataframe(df, use_container_width=True, hide_index=True)
-                chart_values = pd.DataFrame([{"거래선": agency, "신규 관심고객": values.get("신규관심고객수", 0)}
-                                             for agency, values in display_data.items()]).set_index("거래선")
-                st.bar_chart(chart_values, color="#164c96", height=240)
-            
-            st.markdown("---")
-            st.subheader("구매비중 변화 (신규 vs 재구매)")
-            if display_data2:
-                rows = []
-                for agency, data in display_data2.items():
-                    row = {
-                        "거래선": agency,
-                        "신규구매고객": display_number(data.get('신규구매고객수', 0), 0),
-                        "신규구매비중(%)": display_number(data.get('신규구매비중', 0), 1),
-                        "재구매고객": display_number(data.get('재구매고객수', 0), 0),
-                        "재구매비중(%)": display_number(data.get('재구매비중', 0), 1),
-                    }
-                    if data_type == "월별":
-                        row["신규전월비(%)"] = format_change_percent(data.get('신규구매전월비', 0))
-                        row["재구매 전월비(%)"] = format_change_percent(data.get('재구매전월비', 0))
-                    else:
-                        row["신규전주비(%)"] = format_change_percent(data.get('신규구매전주비', 0))
-                        row["재구매 전주비(%)"] = format_change_percent(data.get('재구매전주비', 0))
-                    rows.append(row)
-                df = pd.DataFrame(rows)
-                st.dataframe(df, use_container_width=True, hide_index=True)
-        else:
-            st.warning("스마트스토어 데이터가 없습니다")
+        render_smartstore(st, Path(__file__).resolve().parent)
     elif current_page == "프리미엄":
-        st.subheader("💎 프리미엄 세그먼트 판매 비중")
+        render_premium(st, Path(__file__).resolve().parent)
 
-        star_data, star_errors = load_star_xlsx(Path(__file__).resolve().parent)
-
-        if star_data:
-            scope_type = st.radio("데이터 종류", ["월별", "주차별"], key="premium_scope_type", horizontal=True)
-            if scope_type == "월별":
-                keys = sorted(
-                    set(star_data.get("수량", {}).get("월별", {}).keys()) | set(star_data.get("금액", {}).get("월별", {}).keys()),
-                    key=star_month_sort_key, reverse=True)
-            else:
-                keys = sorted(
-                    set(star_data.get("수량", {}).get("주차별", {}).keys()) | set(star_data.get("금액", {}).get("주차별", {}).keys()),
-                    key=star_week_sort_key, reverse=True)
-                st.caption("STAR 원본 자체 주차 번호이며, PP3G 업무주차표(W번호)와 월경계 주차에서 다를 수 있습니다.")
-
-            if keys:
-                selected_scope = st.selectbox("대상 월" if scope_type == "월별" else "대상 주차", keys, key="premium_scope_value")
-                premium_df = build_premium_segment_table(star_data, scope_type, selected_scope)
-                if not premium_df.empty:
-                    st.markdown(f"### {selected_scope} 품목별 프리미엄 세그먼트 판매 비중")
-                    st.dataframe(premium_df, use_container_width=True, hide_index=True)
-
-                    quantity_rows = premium_df[premium_df[("구분", "구분")] == "수량"]
-                    chart_df = pd.DataFrame({
-                        "품목": quantity_rows[("품목", "품목")],
-                        "S/I 비중(%)": quantity_rows[("S/I", "비중(%)")].map(lambda v: float(v) if v != "N/A" else 0),
-                        "S/O 비중(%)": quantity_rows[("S/O", "비중(%)")].map(lambda v: float(v) if v != "N/A" else 0),
-                    }).set_index("품목")
-                    st.markdown("**품목별 프리미엄 수량 비중**")
-                    st.bar_chart(chart_df, color=["#9966cc", "#c5a3df"], height=300)
-                else:
-                    st.info(f"{selected_scope}에 프리미엄 세그먼트 데이터가 없습니다.")
-            else:
-                st.info("STAR 데이터가 없습니다.")
-
-            if star_errors:
-                with st.expander("STAR 데이터 읽기 안내"):
-                    for error in star_errors:
-                        st.warning(error)
-        else:
-            st.info("STAR 데이터가 없어 프리미엄 세그먼트 분석을 표시할 수 없습니다.")
-
-    
     # 거래선 현황
     elif current_page == "거래선현황":
         st.subheader("📋 거래선 현황")
