@@ -1,1 +1,1 @@
-GitHub browser upload limit 10KB R3 release. Upload streamlit_app.py and every __pp3g_w37r3_*.txt file to the repository root, then commit all changes once. Do not upload README.txt. Existing operational JSON and STAR files are preserved.
+GitHub browser upload limit 10KB R4 release. Upload streamlit_app.py and every __pp3g_w37r4_*.txt file to the repository root, then commit all changes once. Do not upload README.txt. Existing operational JSON and STAR files are preserved.
