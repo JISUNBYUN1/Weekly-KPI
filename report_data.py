@@ -3,7 +3,7 @@ import json
 import math
 from pathlib import Path
 
-BUILD_ID = "20260916-r2"
+BUILD_ID = "20260917-w37"
 REFERENCE_FILES = {"activity_history.json", "smartstore_data.json", "affiliate_data.json",
                    "live_commerce_data.json", "weeks_2026.json"}
 
@@ -12,21 +12,47 @@ def display_number(value, decimals=0, signed=False):
     if not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(value):
         return "미제공"
     prefix = "△" if value < 0 else "+" if signed and value > 0 else ""
-    return prefix + format(abs(value), f",.{decimals}f")
+    return prefix + ("<1" if decimals == 0 and 0 < abs(value) < 0.5 else format(abs(value), f",.{decimals}f"))
 
 
 def read_file(root, name, default):
-    paths = [Path(root) / name]
-    if name in REFERENCE_FILES:
-        paths.append(Path(root) / "reference_data" / name)
-    for path in paths:
+    import copy
+    base = default
+    for path in [Path(root) / name, Path(root) / "reference_data" / name] if name in REFERENCE_FILES else [Path(root) / name]:
         try:
             value = json.loads(path.read_text(encoding="utf-8-sig"))
             if isinstance(value, type(default)):
-                return value
+                base = value
+                break
         except (OSError, ValueError):
             continue
-    return default
+    if name not in REFERENCE_FILES: return base
+    try:
+        snapshot = json.loads((Path(root) / "snapshot_w37" / name).read_text(encoding="utf-8"))
+    except (OSError, ValueError): return base
+    if name == "weeks_2026.json": return snapshot
+    if isinstance(base, list):
+        combined = {(v.get("거래선"),v.get("주차")):v for v in base if isinstance(v,dict)}
+        combined.update({(v.get("거래선"),v.get("주차")):v for v in snapshot})
+        return list(combined.values())
+    def merge(old,new):
+        for k,v in new.items():
+            if isinstance(v,dict) and isinstance(old.get(k),dict): merge(old[k],v)
+            else: old[k]=v
+        return old
+    result = merge(copy.deepcopy(base),snapshot)
+    # Future zero-filled template columns are not closed actuals. Runtime inputs
+    # are overlaid afterwards and may legitimately add subsequent weeks.
+    import re
+    def closed_only(node):
+        if not isinstance(node,dict): return
+        for key in list(node):
+            match=re.fullmatch(r"W(\d+)[AB]?",key)
+            month=re.fullmatch(r"(\d+)월",key)
+            if (match and int(match[1])>37) or (month and int(month[1])>9): node.pop(key)
+            else: closed_only(node[key])
+    closed_only(result)
+    return result
 
 
 def activity_ledger(root):
@@ -69,6 +95,7 @@ def smartstore_dataset(root):
     purchases = data.setdefault("구매비중", {}).setdefault("주차별", {})
     history = read_file(Path(root) / "reference_data", "smartstore_purchase_history.json", {})
     for week, agencies in history.items():
+        if (Path(root) / "snapshot_w37").exists() and int(week[1:].rstrip("AB")) > 37: continue
         for agency, values in agencies.items():
             purchases.setdefault(week, {}).setdefault(agency, values)
     for row in read_file(root, "weekly_data.json", []):
