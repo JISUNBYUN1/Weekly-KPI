@@ -3,7 +3,7 @@ import re
 import pandas as pd
 from report_data import smartstore_dataset, read_file, display_number
 
-BUILD_ID = "20260916-r2"
+BUILD_ID = "20260917-w37"
 
 
 def grouped_table_html(frame):
@@ -102,7 +102,7 @@ def render_smartstore(st, root):
     calendar = read_file(root, "weeks_2026.json", {})
     left, right = st.columns(2)
     with left:
-        month = st.selectbox("대상 월", [f"{m}월" for m in range(12, 0, -1)], index=4, key="smart_month")
+        month = st.selectbox("대상 월", [f"{m}월" for m in range(12, 0, -1)], index=3, key="smart_month")
     from executive_report import weeks_for_month, previous_week_label
     source_months = read_file(root / "reference_data", "smartstore_week_months.json", {})
     def week_order(label):
@@ -126,6 +126,9 @@ def render_smartstore(st, root):
     interests = data.get("신규관심고객", {}).get(scope, {})
     current = interests.get(key, {})
     previous = interests.get(prior_key, {})
+    if monthly and month == "9월":
+        previous = {}
+        st.caption("9/13 마감 누계 · 전월 전체와 비교 제외")
     st.markdown("### 신규 관심고객 유입 현황")
     rows = []
     for agency, values in current.items():
@@ -144,6 +147,7 @@ def render_smartstore(st, root):
         st.caption("취합본의 주차별 신규·재구매 구매자 수를 복원했습니다. 거래선 신규 입력이 있으면 그 값을 우선합니다.")
     purchases = data.get("구매비중", {}).get(scope, {})
     now, before = purchases.get(key, {}), purchases.get(prior_key, {})
+    if monthly and month == "9월": before = {}
     agencies = ["평강", "문성", "케이디엘", "하나로", "회산", "현성", "클릭나라"]
     st.dataframe(pd.DataFrame(purchase_rows(now, before, agencies)), use_container_width=True, hide_index=True)
     if not now:
