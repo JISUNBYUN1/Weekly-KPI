@@ -7,9 +7,9 @@ import zlib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-parts = sorted(ROOT.glob("__pp3g_w37r6_*.txt"))
+parts = sorted(ROOT.glob("__pp3g_w37r7_*.txt"))
 if not parts:
-    raise RuntimeError("W37 R6 구성 파일이 없습니다. __pp3g_w37r6_*.txt 파일을 모두 업로드해주세요.")
+    raise RuntimeError("W37 R7 구성 파일이 없습니다. __pp3g_w37r7_*.txt 파일을 모두 업로드해주세요.")
 try:
     payload = json.loads(zlib.decompress(base64.b85decode("".join(p.read_text(encoding="ascii") for p in parts))).decode("utf-8"))
 except Exception as error:
